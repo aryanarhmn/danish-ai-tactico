@@ -58,8 +58,18 @@ def main():
     parser.add_argument("--no-keeper", action="store_true")
     parser.add_argument("--no-out-latch", action="store_true")
     parser.add_argument("--no-whistle", action="store_true")
+    parser.add_argument("--no-kicker", action="store_true")
     parser.add_argument("--refresh", action="store_true")
+    parser.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
+                        help="override a value in tactico/config.py for this run, e.g. --set CONTROL_MARGIN_M=1.0")
     args = parser.parse_args()
+
+    for item in args.set:
+        name, _, value = item.partition("=")
+        if not hasattr(config, name):
+            parser.error("no setting called {} in tactico/config.py".format(name))
+        old = getattr(config, name)
+        setattr(config, name, (value.lower() == "true") if isinstance(old, bool) else type(old)(value))
 
     if args.no_tagging:
         config.USE_SMART_TAGGING = False
@@ -69,6 +79,8 @@ def main():
         config.USE_OUT_LATCH = False
     if args.no_whistle:
         config.USE_WHISTLE = False
+    if args.no_kicker:
+        config.USE_RESTART_KICKER = False
 
     atd = load.load(refresh=args.refresh)
     feat = features.build(atd, GAMES[GAME]["pitch"])

@@ -10,12 +10,19 @@ FPS = 25
 # A team is a "candidate" on a frame when its nearest player is within CONTROL_RADIUS_M of the
 # ball AND at least CONTROL_MARGIN_M closer than the nearest opponent.
 CONTROL_RADIUS_M = 2.0
-CONTROL_MARGIN_M = 0.5
+CONTROL_MARGIN_M = 1.75  # tested 0.5-2.0 on both validation sets; 1.5-2.0 best, 1.75 gives the right possession counts
 
 # The other team must be candidate for this many frames in a row before possession switches.
 # The switch is then dated back to the first of those frames. The public ground truth has
 # possessions as short as 0.8 s, so do not set this much above 25.
 SWITCH_FRAMES = 15
+
+# After a dead ball, the restart belongs to the team standing at the ball when play resumes: the
+# nearest player within RESTART_RADIUS_M, counted over +/- RESTART_LOOK_FRAMES around the first
+# live frame (validation 1:22:01: a long keeper free kick). Falls back to RESTART_FRAMES below.
+USE_RESTART_KICKER = True
+RESTART_RADIUS_M = 3.0
+RESTART_LOOK_FRAMES = 12
 
 # After a dead ball, the first team that is candidate for this many frames in a row starts the
 # new possession (dated back to the end of the dead ball).

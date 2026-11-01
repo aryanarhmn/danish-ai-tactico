@@ -26,7 +26,34 @@ def candidates(feat):
     return cand
 
 
-def label_block(cand, dead, start, stop, hold=None):
+def kicker_team(feat):
+    """Per frame: the team of the nearest player if within RESTART_RADIUS_M of the ball, else NONE.
+
+    Used at the moment a dead ball ends: the restart is taken by the team that owns it, and the
+    player taking it is the one standing at the ball. Waiting for a team to be "in control" for
+    RESTART_FRAMES instead gives the ball away on long restarts (validation set 1:22:01: the
+    Athletic keeper's long free kick was credited to the Barca player it landed on 7 s later).
+    """
+    d_h, d_a = feat["d_home"], feat["d_away"]
+    h = np.where(np.isnan(d_h), np.inf, d_h)
+    a = np.where(np.isnan(d_a), np.inf, d_a)
+    out = np.full(len(h), NONE, dtype=np.int8)
+    out[(h <= a) & (h <= C.RESTART_RADIUS_M)] = HOME
+    out[(a < h) & (a <= C.RESTART_RADIUS_M)] = AWAY
+    return out
+
+
+def restart_owner(kicker, t, start, stop):
+    """Team at the ball around frame t (the first live frame after a dead ball), or NONE."""
+    lo, hi = max(start, t - C.RESTART_LOOK_FRAMES), min(stop, t + C.RESTART_LOOK_FRAMES + 1)
+    window = kicker[lo:hi]
+    home, away = int(np.sum(window == HOME)), int(np.sum(window == AWAY))
+    if home == away == 0:
+        return NONE
+    return HOME if home >= away else AWAY
+
+
+def label_block(cand, dead, start, stop, hold=None, kicker=None):
     """Labels for frames start..stop-1 (one half). Returns an array of '<U1'.
 
     hold (optional): per-frame team whose keeper holds the ball, -1 for none (keeper.py). A hold
@@ -60,6 +87,12 @@ def label_block(cand, dead, start, stop, hold=None):
             alive_from = t + 1
             continue
 
+        if owner == NONE and kicker is not None and t == alive_from and t > start:
+            k = restart_owner(kicker, t, start, stop)
+            if k != NONE:
+                owner, owner_since = k, t
+                run_team, run_start, run_len = k, t, 0
+
         c = cand[t]
         if c != NONE and c == run_team:
             run_len += 1
@@ -83,7 +116,8 @@ def label(feat, dead, halves, hold=None):
     """Full-length label array. halves = [(half, first_frame, last_frame_inclusive), ...]."""
     n = len(dead)
     cand = candidates(feat)
+    kicker = kicker_team(feat) if C.USE_RESTART_KICKER else None
     labels = np.full(n, "X", dtype="<U1")
     for _, first, last in halves:
-        labels[first:last + 1] = label_block(cand, dead, first, last + 1, hold)
+        labels[first:last + 1] = label_block(cand, dead, first, last + 1, hold, kicker)
     return labels

@@ -1,7 +1,13 @@
-﻿"""Where do we disagree with a ground truth? Biggest mistakes first.
+"""Where do we disagree with a ground truth? Biggest mistakes first.
 
     python tools/error_report.py val/mit_facit.csv
+    python tools/error_report.py evaluation/gt/BAR-ATH_possession_gt_public.csv --top 15
+
+Lists every stretch where our label differs from the ground truth, as video time (h:mm:ss),
+longest first, plus a summary by kind of mistake. Only labels are printed (ours and the ground
+truth), no tracking data, so this output may be shared.
 """
+
 import argparse
 import os
 from collections import Counter
@@ -29,24 +35,27 @@ def main():
     parser.add_argument("--ours", default=OURS)
     parser.add_argument("--top", type=int, default=12)
     args = parser.parse_args()
+
     gt, ours = read(args.gt), read(args.ours)
     stretches, kinds = [], Counter()
-    start, cur = None, None
+    start = None
     for f in range(len(gt) + 1):
         wrong = f < len(gt) and gt[f] != "X" and ours[f] != gt[f]
         key = (gt[f], ours[f]) if wrong else None
-        if start is not None and key != cur:
+        if start is not None and (key != cur):
             stretches.append((f - start, start, f, cur))
             kinds[cur] += f - start
             start = None
         if wrong and start is None:
             start, cur = f, key
+
     graded = sum(1 for g in gt if g != "X")
     print("graded frames {}  wrong {} ({:.0f}%)\n".format(
         graded, sum(kinds.values()), 100.0 * sum(kinds.values()) / max(graded, 1)))
     print("mistakes by kind (truth -> ours), seconds:")
     for (g, o), n in kinds.most_common():
         print("  {:>8} -> {:<8} {:6.1f} s".format(NAMES[g], NAMES[o], n / FPS))
+
     print("\nlongest stretches (watch these in the video):")
     print("  from        to          secs  truth     ours")
     for n, a, b, (g, o) in sorted(stretches, reverse=True)[:args.top]:

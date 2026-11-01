@@ -33,13 +33,23 @@ def to_frame(text):
     The part after the dot is a frame (0-24); a comma works as the dot too."""
     text = text.strip().replace(",", ".")
     if ":" not in text:
-        return int(text)
+        # Danish Numbers/Excel write times as 1.20.28 -- dots instead of colons
+        parts = text.split(".")
+        if len(parts) in (3, 4):
+            text = ":".join(parts[:3]) + ("." + parts[3] if len(parts) == 4 else "")
+        else:
+            return int(text)
     clock, _, frames = text.partition(".")
     parts = [int(p) for p in clock.split(":")]
     seconds = 0
     for p in parts:
         seconds = seconds * 60 + p
     return seconds * FPS + int(frames or 0)
+
+
+def fmt(frame):
+    s = frame // FPS
+    return "{}:{:02d}:{:02d}".format(s // 3600, s // 60 % 60, s % 60)
 
 
 def main(src, dst):
@@ -50,7 +60,10 @@ def main(src, dst):
         delimiter = ";" if sample.count(";") > sample.count(",") else ","
         rows = [(to_frame(r["start"]), r["label"].strip().upper())
                 for r in csv.DictReader(handle, delimiter=delimiter) if r.get("start")]
-    rows.sort()
+    for (a, la), (b, lb) in zip(rows, rows[1:]):
+        if b <= a:
+            raise ValueError("times must increase: {} ({}) is followed by {} ({}). Fix that row.".format(
+                fmt(a), la, fmt(b), lb))
     for (start, lab), (stop, _) in zip(rows, rows[1:]):
         if lab == "END":
             continue
