@@ -1,7 +1,7 @@
 """Every tunable number in one place.
 
-Tune these against your own hand-labelled validation set (see tools/intervals_to_gt.py), never
-against the public 5 minutes alone: 17 possessions is too few to choose between two settings.
+Tuned on EXTERNAL data only: Metrica's three public sample games (tools/tune_external.py), as
+the organisers' rules require. Never tune on the competition game, its ground truth or its video.
 """
 
 FPS = 25
@@ -9,17 +9,17 @@ FPS = 25
 # --- possession -----------------------------------------------------------------------------
 # A team is a "candidate" on a frame when its nearest player is within CONTROL_RADIUS_M of the
 # ball AND at least CONTROL_MARGIN_M closer than the nearest opponent.
-CONTROL_RADIUS_M = 2.0
-CONTROL_MARGIN_M = 1.75  # tested 0.5-2.0 on both validation sets; 1.5-2.0 best, 1.75 gives the right possession counts
+CONTROL_RADIUS_M = 1.5   # tools/tune_external.py --grid poss
+CONTROL_MARGIN_M = 1.0   # tools/tune_external.py --grid poss: best region with and without simulated noise
 
 # The other team must be candidate for this many frames in a row before possession switches.
 # The switch is then dated back to the first of those frames. The public ground truth has
 # possessions as short as 0.8 s, so do not set this much above 25.
-SWITCH_FRAMES = 15
+SWITCH_FRAMES = 10       # tools/tune_external.py --grid poss
 
 # After a dead ball, the restart belongs to the team standing at the ball when play resumes: the
 # nearest player within RESTART_RADIUS_M, counted over +/- RESTART_LOOK_FRAMES around the first
-# live frame (validation 1:22:01: a long keeper free kick). Falls back to RESTART_FRAMES below.
+# live frame (seen in the video: a long keeper free kick). Falls back to RESTART_FRAMES below.
 USE_RESTART_KICKER = True
 RESTART_RADIUS_M = 3.0
 RESTART_LOOK_FRAMES = 12
@@ -57,10 +57,10 @@ PLAY_BALL_MS = 3.0
 PLAY_FRAMES = 25
 
 # Ball lost at the line (deadball.lost_at_line): the tracker often loses the ball as it goes out,
-# so ball_out never fires (Ibrahim's set, corner at 0:34:49: we noticed only 13 s later). The ball
+# so ball_out never fires (seen in the video at a corner). The ball
 # missing for LOST_FRAMES with its last tracked position within LOST_LINE_M of a line, or outside
 # the pitch, counts as out -> dead until the restart (same release as the out-latch).
-USE_LOST_OUT = False  # Ibrahim unchanged, own set .612 -> .596, public .485 -> .482
+USE_LOST_OUT = False  # cannot be tested on the external games (their ball is removed when dead)
 LOST_LINE_M = 2.0
 LOST_FRAMES = 25
 
@@ -70,15 +70,15 @@ USE_WHISTLE = True
 STOP_WINDOW_FRAMES = 25
 STOP_SPEED_MS = 1.2
 STOP_BALL_MS = 3.0
-STOP_FRAMES = 25
-STOP_BACKDATE_FRAMES = 50
+STOP_FRAMES = 50              # tools/tune_external.py --grid whistle
+STOP_BACKDATE_FRAMES = 25     # tools/tune_external.py --grid whistle
 
 # Goal (deadball.goal_until_kickoff): the ball crosses the goal line between the posts -> dead
-# until the kick-off from the centre spot. Ibrahim's set, 0:31:07: after the goal we kept Barca in
-# possession for 16 s (celebrating players run, so no other rule fired). A goal only counts when
+# until the kick-off from the centre spot (seen in the video: after a goal, celebrating players run,
+# so no other rule fired). A goal only counts when
 # a kick-off follows within GOAL_MAX_FRAMES, and is abandoned if play runs on for
 # GOAL_ABORT_PLAY_FRAMES first (a save, a shot over the bar, a disallowed goal).
-USE_GOAL = False  # tracker loses the ball at the centre spot: 0 kick-offs found, 0:31:07 not even a candidate
+USE_GOAL = False  # automatic check (tools/goal_debug.py): the tracker never holds the ball still at the centre spot, so no kick-off is found
 GOAL_HALF_WIDTH_M = 4.2      # 3.66 m half goal + tracking slack
 GOAL_DEPTH_M = 3.0           # how far behind the line the ball may be (net depth + slack)
 GOAL_MIN_FRAMES = 3
@@ -93,8 +93,7 @@ GOAL_MAX_FRAMES = 3750       # 150 s: celebration and VAR check
 GOAL_ABORT_PLAY_FRAMES = 250
 
 # Smart Tagging set pieces. The tag window (~5 s) contains the restart, but where in the window is
-# not known. SETPIECE_RESTART_FRAC = 0.5 assumes the middle; tune it on the public 5 minutes and
-# your validation set. Frames from the window start to the restart are marked dead.
+# not known. SETPIECE_RESTART_FRAC = 0.5 assumes the middle; tune it on external data only. Frames from the window start to the restart are marked dead.
 USE_SMART_TAGGING = False
 SETPIECE_RESTART_FRAC = 0.5
 

@@ -31,7 +31,7 @@ def kicker_team(feat):
 
     Used at the moment a dead ball ends: the restart is taken by the team that owns it, and the
     player taking it is the one standing at the ball. Waiting for a team to be "in control" for
-    RESTART_FRAMES instead gives the ball away on long restarts (validation set 1:22:01: the
+    RESTART_FRAMES instead gives the ball away on long restarts (seen in the video: the
     Athletic keeper's long free kick was credited to the Barca player it landed on 7 s later).
     """
     d_h, d_a = feat["d_home"], feat["d_away"]

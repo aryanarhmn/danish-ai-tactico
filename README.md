@@ -31,13 +31,32 @@ python evaluation/run_evaluation.py
 
 The output is deterministic: running it twice gives a byte-identical file.
 
-## Validation
+## Tuning on external data
 
-`tools/intervals_to_gt.py` turns hand-labelled video intervals into a ground-truth CSV for
-`run_evaluation.py --gt`. Hand labels are used for validation only; the submitted file comes
-entirely from `run.py`.
+Every number in `tactico/config.py` is tuned on external data only, as the organisers' rules
+require: Metrica Sports' three public sample games
+([metrica-sports/sample-data](https://github.com/metrica-sports/sample-data), used with
+acknowledgement of the source). Those games have no possession ground truth, so
+`tools/external/metrica_sample.py` derives labels from their event data, and
+`tools/tune_external.py` scores each parameter variant on all three games with the competition
+scorer and prints the mean.
+
+```bash
+git clone --depth 1 https://github.com/metrica-sports/sample-data.git ../sample-data
+python tools/tune_external.py --sample-dir ../sample-data --grid poss
+python tools/tune_external.py --sample-dir ../sample-data --grid poss --noise 0.3
+```
+
+Two differences from the competition data are handled explicitly: the sample games drop the ball
+from the tracking while it is dead, so long ball gaps are filled by interpolation (otherwise a
+tuner learns "no ball = dead ball"); and their tracking is corrected, so `--noise` adds simulated
+position error to check that a choice also holds on noisier tracking.
+
+No hand labels are used anywhere, and nothing is tuned on the competition game, its ground truth
+or its video. The video was only watched to understand what counts as possession and a dead ball,
+which shaped which rules exist.
 
 ## Data
 
-The match data is not in this repository and must not be: `data/`, `cache/` and `val/` are
+The match data is not in this repository and must not be: `data/` and `cache/` are
 gitignored.

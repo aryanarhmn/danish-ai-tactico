@@ -234,7 +234,9 @@ def goals(feat):
     return runs(goal_until_kickoff(feat))
 
 
-def mask(feat, events=None):
+def mask(feat, events=None, forced=((SECOND_HALF_GRADED_FROM, SECOND_HALF_KICKOFF),)):
+    """forced: (start, stop) frame ranges known to be dead. The default is the Barca-Athletic
+    second-half gap; pass () for other games."""
     n = len(feat["ball_visible"])
     dead = feat["ball_out"] | stopped(feat)
     if C.USE_OUT_LATCH:
@@ -250,5 +252,6 @@ def mask(feat, events=None):
         dead |= goal
     dead = _close_gaps(dead, C.MERGE_GAP_FRAMES)
     dead = _min_run(dead, C.MIN_DEAD_FRAMES)
-    dead[SECOND_HALF_GRADED_FROM:SECOND_HALF_KICKOFF] = True
+    for a, b in forced:
+        dead[a:b] = True
     return dead

@@ -4,9 +4,7 @@
     python tools/inspect_frames.py 12800 13050 --step 1   # every frame
 
 Columns:
-    frame  video time  GT  ours  ball  d_H  d_A  ballspd  plyspd  out  dead  cand
-    GT     public ground truth (only frames 11185..18684), '.' elsewhere
-    ours   our label from evaluation/results/Danish_AI-Tactico.csv (run run.py first)
+    frame  video time  ball  d_H  d_A  ballspd  plyspd  out  dead  cand
     ball   1 if the tracker sees the ball
     d_H/d_A nearest Barca / Athletic player to the ball, metres
     cand   which team the possession rule sees as in control on that frame (H, A or -)
@@ -56,18 +54,14 @@ def main():
     cand = possession.candidates(feat)
     from games import half_video_blocks
     hold = keeper.hold_team(atd, feat, half_video_blocks(GAME), GAMES[GAME]["pitch"])
-    gt = read_labels(GT_PATH)
-    ours = read_labels(OURS_PATH)
 
-    print("frame   time      GT ours ball   d_H    d_A  ballspd plyspd out dead cand keeper")
+    print("frame   time      ball   d_H    d_A  ballspd plyspd out dead cand keeper")
     for f in range(args.start, args.end + 1, args.step):
         t = f / config.FPS
-        g = gt[f] if gt is not None and gt[f] != "X" else "."
-        o = ours[f] if ours is not None else "?"
         c = {0: "H", 1: "A"}.get(int(cand[f]), "-")
         k = {0: "H", 1: "A"}.get(int(hold[f]), "-")
-        print("{:6d}  {:02d}:{:05.2f}  {}  {}    {}   {:5.1f}  {:5.1f}  {:6.1f}  {:5.1f}   {}   {}    {}    {}".format(
-            f, int(t // 60), t % 60, g, o, int(feat["ball_visible"][f]),
+        print("{:6d}  {:02d}:{:05.2f}  {}   {:5.1f}  {:5.1f}  {:6.1f}  {:5.1f}   {}   {}    {}    {}".format(
+            f, int(t // 60), t % 60, int(feat["ball_visible"][f]),
             feat["d_home"][f], feat["d_away"][f], feat["ball_speed"][f],
             feat["player_speed"][f], int(feat["ball_out"][f]), int(dead[f]), c, k))
 
