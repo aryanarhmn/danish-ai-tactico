@@ -56,6 +56,14 @@ PLAY_SPEED_MS = 1.5
 PLAY_BALL_MS = 3.0
 PLAY_FRAMES = 25
 
+# Ball lost at the line (deadball.lost_at_line): the tracker often loses the ball as it goes out,
+# so ball_out never fires (Ibrahim's set, corner at 0:34:49: we noticed only 13 s later). The ball
+# missing for LOST_FRAMES with its last tracked position within LOST_LINE_M of a line, or outside
+# the pitch, counts as out -> dead until the restart (same release as the out-latch).
+USE_LOST_OUT = False  # Ibrahim unchanged, own set .612 -> .596, public .485 -> .482
+LOST_LINE_M = 2.0
+LOST_FRAMES = 25
+
 # Whistle with the ball on the pitch (offside, foul) -> dead until the free kick
 # (deadball.whistle_until_restart). Speeds are averaged over +/- STOP_WINDOW_FRAMES first.
 USE_WHISTLE = True
@@ -64,6 +72,25 @@ STOP_SPEED_MS = 1.2
 STOP_BALL_MS = 3.0
 STOP_FRAMES = 25
 STOP_BACKDATE_FRAMES = 50
+
+# Goal (deadball.goal_until_kickoff): the ball crosses the goal line between the posts -> dead
+# until the kick-off from the centre spot. Ibrahim's set, 0:31:07: after the goal we kept Barca in
+# possession for 16 s (celebrating players run, so no other rule fired). A goal only counts when
+# a kick-off follows within GOAL_MAX_FRAMES, and is abandoned if play runs on for
+# GOAL_ABORT_PLAY_FRAMES first (a save, a shot over the bar, a disallowed goal).
+USE_GOAL = False  # tracker loses the ball at the centre spot: 0 kick-offs found, 0:31:07 not even a candidate
+GOAL_HALF_WIDTH_M = 4.2      # 3.66 m half goal + tracking slack
+GOAL_DEPTH_M = 3.0           # how far behind the line the ball may be (net depth + slack)
+GOAL_MIN_FRAMES = 3
+# The tracker seldom sees the ball in the net (0 found on the whole match), so the ball vanishing
+# for GOAL_LOST_FRAMES with its last position within GOAL_LOST_LINE_M of the goal line, between
+# the posts (+slack), is a candidate too. The kick-off check below decides.
+GOAL_LOST_LINE_M = 3.0
+GOAL_LOST_FRAMES = 25
+KICKOFF_RADIUS_M = 2.0
+KICKOFF_QUIET_FRAMES = 25
+GOAL_MAX_FRAMES = 3750       # 150 s: celebration and VAR check
+GOAL_ABORT_PLAY_FRAMES = 250
 
 # Smart Tagging set pieces. The tag window (~5 s) contains the restart, but where in the window is
 # not known. SETPIECE_RESTART_FRAC = 0.5 assumes the middle; tune it on the public 5 minutes and

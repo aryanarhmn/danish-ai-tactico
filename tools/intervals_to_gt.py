@@ -22,6 +22,8 @@ Hand labels are allowed for VALIDATION and TRAINING only. The submitted file mus
 """
 
 import csv
+import io
+import re
 import sys
 
 N_FRAMES = 199319
@@ -32,6 +34,11 @@ def to_frame(text):
     """'1:20:05' or '1:20:05.12' (h:mm:ss), '12:30' or '12:30.12' (mm:ss), or a frame number.
     The part after the dot is a frame (0-24); a comma works as the dot too."""
     text = text.strip().replace(",", ".")
+    # Numbers exports durations as '30m 18s', '31m' or '1h 2m 3s'
+    m = re.fullmatch(r"(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?\s*(?:(\d+(?:\.\d+)?)\s*s)?", text)
+    if m and any(m.groups()):
+        h, mi, se = (float(g) if g else 0 for g in m.groups())
+        return int(round((h * 3600 + mi * 60 + se) * FPS))
     if ":" not in text:
         # Danish Numbers/Excel write times as 1.20.28 -- dots instead of colons
         parts = text.split(".")
@@ -54,7 +61,11 @@ def fmt(frame):
 
 def main(src, dst):
     labels = ["X"] * N_FRAMES
-    with open(src, newline="", encoding="utf-8-sig") as handle:
+    with open(src, newline="", encoding="utf-8-sig") as raw:
+        lines = raw.read().splitlines()
+    # Numbers puts the sheet and table name above the header: skip until the 'start' row
+    first = next((i for i, line in enumerate(lines) if line.lower().startswith("start")), 0)
+    with io.StringIO("\n".join(lines[first:])) as handle:
         sample = handle.read(2048)
         handle.seek(0)
         delimiter = ";" if sample.count(";") > sample.count(",") else ","

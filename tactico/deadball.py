@@ -129,6 +129,22 @@ def out_until_restart(feat):
     return until_restart(feat, _min_run(feat["ball_out"], C.OUT_MIN_FRAMES))
 
 
+def lost_at_line(feat):
+    """True over every run of >= LOST_FRAMES missing-ball frames whose last tracked position was
+    within LOST_LINE_M of a pitch line (or beyond it)."""
+    x, y, visible = feat["ball_x"], feat["ball_y"], feat["ball_visible"]
+    length, width = feat["pitch"]
+    m = C.LOST_LINE_M
+    out = np.zeros(len(x), dtype=bool)
+    for a, b in runs(~visible):
+        if b - a < C.LOST_FRAMES or a == 0:
+            continue
+        lx, ly = x[a - 1], y[a - 1]
+        if lx < m or lx > length - m or ly < m or ly > width - m:
+            out[a:b] = True
+    return out
+
+
 def whistle_until_restart(feat):
     """Referee stops play with the ball on the pitch (offside, foul): dead until the free kick.
 
@@ -147,15 +163,91 @@ def whistle_until_restart(feat):
     return until_restart(feat, trigger, C.STOP_BACKDATE_FRAMES)
 
 
+def goal_candidates(feat):
+    """True where a goal may have happened: the ball tracked behind the goal line between the posts,
+    or the ball vanishing for GOAL_LOST_FRAMES right in front of the goal mouth."""
+    x, y, visible = feat["ball_x"], feat["ball_y"], feat["ball_visible"]
+    length, width = feat["pitch"]
+    with np.errstate(invalid="ignore"):
+        mouth = np.abs(y - width / 2) <= C.GOAL_HALF_WIDTH_M
+        behind = ((x < 0) & (x > -C.GOAL_DEPTH_M)) | ((x > length) & (x < length + C.GOAL_DEPTH_M))
+        near = (x < C.GOAL_LOST_LINE_M) | (x > length - C.GOAL_LOST_LINE_M)
+    cand = _min_run(behind & mouth, C.GOAL_MIN_FRAMES)
+    for a, b in runs(~visible):
+        if b - a >= C.GOAL_LOST_FRAMES and a > 0 and near[a - 1] and mouth[a - 1]:
+            cand[a] = True
+    return cand
+
+
+def goal_until_kickoff(feat):
+    """Ball over the goal line between the posts -> dead until the kick-off from the centre spot.
+
+    Kick-off = the ball lies within KICKOFF_RADIUS_M of the centre spot, slower than
+    RESTART_QUIET_MS, for KICKOFF_QUIET_FRAMES, and is then struck at RESTART_KICK_MS or more.
+    No kick-off within GOAL_MAX_FRAMES, or GOAL_ABORT_PLAY_FRAMES of open play first -> not a goal,
+    nothing is marked and the other rules decide.
+    """
+    x, y, speed = feat["ball_x"], feat["ball_y"], feat["ball_speed"]
+    length, width = feat["pitch"]
+    n = len(x)
+    with np.errstate(invalid="ignore"):
+        at_centre = np.hypot(x - length / 2, y - width / 2) <= C.KICKOFF_RADIUS_M
+        quiet_centre = at_centre & (speed < C.RESTART_QUIET_MS)
+        kick = speed >= C.RESTART_KICK_MS
+        players = _rolling_mean(feat["player_speed"], C.STOP_WINDOW_FRAMES)
+        ballm = _rolling_mean(speed, C.STOP_WINDOW_FRAMES)
+        playing = (players >= C.PLAY_SPEED_MS) & (ballm >= C.PLAY_BALL_MS) & ~feat["ball_out"]
+    trigger = goal_candidates(feat)
+
+    dead = np.zeros(n, dtype=bool)
+    t = 0
+    while t < n:
+        if not trigger[t]:
+            t += 1
+            continue
+        start, quiet_run, play_run, kickoff = t, 0, 0, None
+        u = t + 1
+        while u < n and u - start < C.GOAL_MAX_FRAMES:
+            play_run = play_run + 1 if playing[u] else 0
+            if play_run >= C.GOAL_ABORT_PLAY_FRAMES:
+                break
+            if quiet_centre[u]:
+                quiet_run += 1
+            elif kick[u] and quiet_run >= C.KICKOFF_QUIET_FRAMES:
+                kickoff = u
+                break
+            elif not np.isnan(x[u]):
+                quiet_run = 0
+            u += 1
+        if kickoff is not None:
+            dead[start:kickoff] = True
+            t = kickoff
+        else:
+            t += 1
+            while t < n and trigger[t]:
+                t += 1
+    return dead
+
+
+def goals(feat):
+    """(start, kick-off) frame pairs found by goal_until_kickoff, for printing."""
+    return runs(goal_until_kickoff(feat))
+
+
 def mask(feat, events=None):
     n = len(feat["ball_visible"])
     dead = feat["ball_out"] | stopped(feat)
     if C.USE_OUT_LATCH:
         dead |= out_until_restart(feat)
+    if C.USE_LOST_OUT:
+        dead |= until_restart(feat, lost_at_line(feat))
     if C.USE_WHISTLE:
         dead |= whistle_until_restart(feat)
     if C.USE_SMART_TAGGING and events:
         dead |= setpieces(n, events)
+    if C.USE_GOAL:
+        goal = goal_until_kickoff(feat)
+        dead |= goal
     dead = _close_gaps(dead, C.MERGE_GAP_FRAMES)
     dead = _min_run(dead, C.MIN_DEAD_FRAMES)
     dead[SECOND_HALF_GRADED_FROM:SECOND_HALF_KICKOFF] = True

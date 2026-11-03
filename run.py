@@ -59,6 +59,8 @@ def main():
     parser.add_argument("--no-out-latch", action="store_true")
     parser.add_argument("--no-whistle", action="store_true")
     parser.add_argument("--no-kicker", action="store_true")
+    parser.add_argument("--no-goal", action="store_true")
+    parser.add_argument("--no-lost", action="store_true")
     parser.add_argument("--refresh", action="store_true")
     parser.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
                         help="override a value in tactico/config.py for this run, e.g. --set CONTROL_MARGIN_M=1.0")
@@ -81,6 +83,10 @@ def main():
         config.USE_WHISTLE = False
     if args.no_kicker:
         config.USE_RESTART_KICKER = False
+    if args.no_goal:
+        config.USE_GOAL = False
+    if args.no_lost:
+        config.USE_LOST_OUT = False
 
     atd = load.load(refresh=args.refresh)
     feat = features.build(atd, GAMES[GAME]["pitch"])
@@ -95,6 +101,12 @@ def main():
     hold = keeper.hold_team(atd, feat, halves, GAMES[GAME]["pitch"]) if config.USE_KEEPER else None
     labels = possession.label(feat, dead, halves, hold)
 
+    if config.USE_GOAL:
+        found = deadball.goals(feat)
+        print("goal candidates {} (ball behind the line or lost at the goal mouth)".format(
+            len(deadball.runs(deadball.goal_candidates(feat)))))
+        print("goals found    {}  at video {}".format(len(found), ", ".join(
+            "{}:{:02d}:{:02d}".format(a // 90000, a // 1500 % 60, a // 25 % 60) for a, _ in found) or "-"))
     write_csv(args.out, labels)
     summary(labels, halves)
     print("wrote", os.path.relpath(args.out, ROOT))

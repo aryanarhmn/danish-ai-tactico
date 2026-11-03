@@ -63,4 +63,7 @@ def build(atd, pitch):
         "ball_out": ball_out(ball, pitch),
         "ball_inside_wide": ball_inside(ball, pitch, C.RESTART_INSIDE_M),
         "player_speed": mean_player_speed(atd["speed"]),
+        "ball_x": ball[:, 0],
+        "ball_y": ball[:, 1],
+        "pitch": pitch,
     }
