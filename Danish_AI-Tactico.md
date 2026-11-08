@@ -38,16 +38,20 @@ The video was watched only to understand what counts as possession and a dead ba
   the events. We use these matches only as a second, independent test set.
 
 **Making clean data look like the competition data.** External tracking is corrected; the
-competition tracking is automatic. `tools/noise_match.py` measures the provided tracking with an
-automatic check that prints summary numbers only (no ground truth, no video): the ball is missing
-on 41 % of the frames inside the halves, in 150 gaps with a mean of 17 s and a median of 11 s;
-positions are very smooth (about 1 cm of frame-to-frame jitter on the ball); about 10.2 of 11
-players per team are in view; speeds are in m/s.
+competition tracking is automatic. Two scripts measure the provided tracking with automatic checks
+that print summary numbers only (no ground truth, no video). `tools/noise_match.py`: the ball is
+missing on 41 % of the frames inside the halves, in 150 gaps with a mean of 17 s and a median of
+11 s; positions are very smooth (about 1 cm of frame-to-frame jitter on the ball); about 10.2 of 11
+players per team are in view; speeds are in m/s. `tools/gap_profile.py`: the ball is missing on
+80 % of frames where the players' mean speed is below 1 m/s, 42 % at 1 to 2 m/s and 11 % above
+2 m/s. The tracker loses the ball mostly around stoppages.
 
-During training we degrade every external match to match those numbers: the ball is removed on
-41 % of frames in gaps of mean 10 or 17 seconds, 1.5 to 3 cm of smooth position error is added, and
-player tracks drop out for 7 to 12 % of the time. Each match is used under two such degradations.
-Test matches get a third degradation the model has not seen.
+During training we degrade every external match to match those numbers. Ball gaps are placed where
+a smooth random field falls below the measured missing rate for the players' current speed, which
+gives 43 % missing in about 140 gaps per match with a mean of 17 s and a median of 10 s. We add
+1.5 to 3 cm of smooth position error, and player tracks drop out for 7 to 12 % of the time. Each
+match is used under two such degradations. Test matches get a third degradation the model has not
+seen.
 
 ## Features
 
@@ -89,10 +93,16 @@ above.
 
 | | Rules (v7) | Learned model |
 |---|---|---|
-| DFL, leave-one-match-out (7 matches) | 0.329 | 0.533 |
-| Metrica sample games, model trained on DFL (3 matches) | 0.427 | 0.563 |
+| DFL, leave-one-match-out (7 matches) | 0.383 | 0.568 |
+| Metrica sample games, model trained on DFL (3 matches) | 0.492 | 0.582 |
 
-The model wins on every one of the ten matches. We report no score on the competition game: its
+The model wins on every one of the ten matches.
+
+We also tried a second stage that sees the first stage's probabilities over 30 seconds before
+and after each frame (`tools/stack_cv.py`). It scored the same on DFL (0.568) and 0.014 higher on
+the Metrica games, too little to justify a second model, so we left it out. Earlier we tried, and
+dropped, a rule that the ball must move with the player and rules for goals and for a ball lost at
+the line; none helped on external data. We report no score on the competition game: its
 public five minutes were not used to choose or tune anything.
 
 ## Limitations

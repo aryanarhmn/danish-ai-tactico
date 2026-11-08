@@ -33,13 +33,17 @@ STRIDE = 5
 # Measured on the competition tracking with tools/noise_match.py (summary numbers only): ball
 # missing on 41 % of frames in gaps of mean 17 s (median 11 s), very smooth positions (ball jitter
 # about 1 cm, i.e. about 0.015 m of noise), about 10.2 of 11 players per team in view.
-TRAIN_MIX = "0.015:0.41:430:0.07,0.03:0.41:250:0.12"
-TEST_MIX = "0.02:0.41:340:0.09"
+# tools/gap_profile.py: the ball is missing on 80 % of frames with the players slow (< 1 m/s), 42 % at
+# 1-2 m/s and 11 % above 2 m/s, so gaps are placed by player speed (fifth field = 1).
+TRAIN_MIX = "0.015:0.41:200:0.07:1,0.03:0.41:150:0.12:1"
+TEST_MIX = "0.02:0.41:250:0.09:1"
 COSTS = [(s, d) for s in (4.0, 8.0, 12.0, 16.0, 24.0) for d in (4.0, 8.0, 12.0, 16.0)]
 
 
 def parse_mix(text):
-    """'noise:missing:gap:player_drop,...' -> list of tuples."""
+    """'noise:missing:gap:player_drop[:by_speed],...' -> list of tuples. by_speed=1 places ball
+    gaps where the players are slow, as measured on the competition tracking (gap = correlation
+    length in frames, missing is then set by the measured rates)."""
     return [tuple(float(v) for v in part.split(":")) for part in text.split(",")]
 
 
@@ -48,8 +52,11 @@ def prepare(data, sample_dir, dfl_dir, mix, seed_base=0):
     out, names = [], None
     for i, (name, d) in enumerate(raw_games(data, sample_dir, dfl_dir)):
         Xs = []
-        for j, (noise, miss, gap, pdrop) in enumerate(mix):
-            dd = degrade(d, noise, miss, int(gap), pdrop, seed=seed_base + 10 * (i + 1) + j)
+        for j, spec in enumerate(mix):
+            noise, miss, gap, pdrop = spec[:4]
+            by_speed = spec[4] if len(spec) > 4 else 0
+            dd = degrade(d, noise, miss, int(gap), pdrop, seed=seed_base + 10 * (i + 1) + j,
+                         by_speed=by_speed)
             X, names = ml.features(dd)
             Xs.append(X)
         y = np.array([CODE.get(v, -1) for v in d["labels"]], dtype=np.int8)

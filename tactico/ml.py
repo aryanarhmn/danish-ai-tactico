@@ -191,6 +191,11 @@ def features(d, pitch=(105.0, 68.0)):
     return np.stack(cols, axis=1).astype(np.float32), names
 
 
+FEATURE_NAMES = (["h_" + k for k in TEAM_FEATURES] + ["a_" + k for k in TEAM_FEATURES]
+                 + list(SHARED_FEATURES))
+FEATURE_INDEX = {k: i for i, k in enumerate(FEATURE_NAMES)}
+
+
 def swap_teams(X):
     """Same rows with the home and away blocks swapped (gap_d1 negated)."""
     k = len(TEAM_FEATURES)
@@ -240,3 +245,37 @@ def label(prob, halves, switch_cost, dead_cost, prior=None):
         path = viterbi(prob[first:last + 1], switch_cost, dead_cost, prior)
         out[first:last + 1] = np.array(STATES)[path]
     return out
+
+
+# ----------------------------------------------------------------------------- second stage
+
+STACK_WINDOWS = (25, 75, 250, 750)          # 1, 3, 10, 30 s
+
+
+def stack_features(prob, X):
+    """Second-stage rows: first-stage P(H), P(A), P(D) now and averaged over the previous and the
+    next 1, 3, 10 and 30 s, plus ball-tracking context. Column pairs (H, A) swap with the teams."""
+    names = ("ball_seen", "ball_age", "speed_all")
+    base = [X[:, FEATURE_INDEX[k]] for k in names]
+    cols = [prob[:, 0], prob[:, 1], prob[:, 2]]
+    for w in STACK_WINDOWS:
+        for ahead in (False, True):
+            for c in range(3):
+                cols.append(_shift_mean(prob[:, c], w, ahead))
+    return np.stack(cols + base, axis=1).astype(np.float32)
+
+
+def swap_stack(S):
+    """Swap H and A columns in second-stage rows."""
+    Y = S.copy()
+    n_prob = 3 * (1 + 2 * len(STACK_WINDOWS))
+    for start in range(0, n_prob, 3):
+        Y[:, start], Y[:, start + 1] = S[:, start + 1], S[:, start]
+    return Y
+
+
+def predict_stack(model2, prob, X):
+    S = stack_features(prob, X)
+    p1 = model2.predict_proba(S)
+    p2 = model2.predict_proba(swap_stack(S))[:, [1, 0, 2]]
+    return (p1 + p2) / 2

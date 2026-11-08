@@ -121,9 +121,44 @@ def drop_players(d, frac, mean_gap, seed):
     return d
 
 
-def degrade(d, noise, ball_missing, gap, player_drop, seed):
+# Measured on the competition tracking with tools/gap_profile.py (summary numbers only): the ball is
+# missing on 80 % of frames where the players' mean speed is below 1 m/s, 42 % at 1-2 m/s and
+# 11 % above 2 m/s. In other words it is lost mostly around stoppages.
+SPEED_BINS = (1.0, 2.0)
+MISSING_BY_SPEED = (0.80, 0.42, 0.11)
+
+
+def drop_ball_by_speed(d, corr, seed, probs=MISSING_BY_SPEED):
+    """Remove the ball where a smooth random field falls below the measured missing rate for the
+    players' current mean speed. `corr` (frames) sets how long gaps last."""
+    rng = np.random.default_rng(3000 + seed)
+    n = len(d["ball"])
+    with np.errstate(invalid="ignore"):
+        sp = np.nanmean(d["speed"], axis=1)
+    sp = np.nan_to_num(sp, nan=1.5)
+    k = np.ones(125) / 125.0
+    sp = np.convolve(sp, k, "same")
+    p = np.where(sp < SPEED_BINS[0], probs[0], np.where(sp < SPEED_BINS[1], probs[1], probs[2]))
+    z = rng.normal(0, 1, n)
+    w = np.exp(-0.5 * (np.arange(-3 * corr, 3 * corr + 1) / float(corr)) ** 2)
+    z = np.convolve(z, w / np.sqrt(np.sum(w * w)), "same")
+    from math import erf, sqrt
+    u = 0.5 * (1 + np.vectorize(erf)(z / sqrt(2)))
+    miss = u < p
+    d = dict(d)
+    d["ball"] = d["ball"].copy()
+    d["ball"][miss] = np.nan
+    return d
+
+
+def degrade(d, noise, ball_missing, gap, player_drop, seed, by_speed=0):
+    """by_speed: 0 = gaps at random (drop_ball), else gaps follow player speed (drop_ball_by_speed)
+    with `gap` as correlation length."""
     d = add_noise(d, noise, seed=seed)
-    d = drop_ball(d, ball_missing, gap, seed=seed)
+    if by_speed:
+        d = drop_ball_by_speed(d, int(gap), seed=seed)
+    else:
+        d = drop_ball(d, ball_missing, gap, seed=seed)
     return drop_players(d, player_drop, 125, seed=seed)
 
 
