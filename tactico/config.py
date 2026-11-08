@@ -12,6 +12,11 @@ FPS = 25
 CONTROL_RADIUS_M = 1.5   # tools/tune_external.py --grid poss
 CONTROL_MARGIN_M = 1.0   # tools/tune_external.py --grid poss: best region with and without simulated noise
 
+# Control also needs the ball to move with the player: the difference between ball and player
+# velocity at most CONTROL_REL_SPEED_MS. A hard pass flying past an opponent is not his.
+# 99 = rule off.
+CONTROL_REL_SPEED_MS = 99.0
+
 # The other team must be candidate for this many frames in a row before possession switches.
 # The switch is then dated back to the first of those frames. The public ground truth has
 # possessions as short as 0.8 s, so do not set this much above 25.

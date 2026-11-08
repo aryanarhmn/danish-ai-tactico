@@ -1,0 +1,4 @@
+# The learned model (tactico/ml.py, tools/train_ml.py). Trained on external data only.
+numpy
+pandas
+scikit-learn>=1.3

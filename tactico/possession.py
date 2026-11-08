@@ -21,8 +21,12 @@ def candidates(feat):
     h = np.where(np.isnan(d_h), np.inf, d_h)
     a = np.where(np.isnan(d_a), np.inf, d_a)
     cand = np.full(len(h), NONE, dtype=np.int8)
-    cand[(h <= C.CONTROL_RADIUS_M) & (h + C.CONTROL_MARGIN_M <= a)] = HOME
-    cand[(a <= C.CONTROL_RADIUS_M) & (a + C.CONTROL_MARGIN_M <= h)] = AWAY
+    # the ball must move with the player (unknown relative speed counts as moving with him)
+    with np.errstate(invalid="ignore"):
+        ok_h = ~(feat["rel_home"] > C.CONTROL_REL_SPEED_MS)
+        ok_a = ~(feat["rel_away"] > C.CONTROL_REL_SPEED_MS)
+    cand[(h <= C.CONTROL_RADIUS_M) & (h + C.CONTROL_MARGIN_M <= a) & ok_h] = HOME
+    cand[(a <= C.CONTROL_RADIUS_M) & (a + C.CONTROL_MARGIN_M <= h) & ok_a] = AWAY
     return cand
 
 

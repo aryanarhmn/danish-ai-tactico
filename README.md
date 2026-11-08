@@ -4,27 +4,23 @@ Frame-level ball possession for FC Barcelona vs Athletic Club, built on Metrica 
 [challenge repository](https://github.com/metrica-sports/more-than-a-hack-2027). Their files are
 kept unchanged (`games.py`, `evaluation/`, `starter/`, docs; their README is `README_metrica.md`).
 
-## Approach (first draft)
+## Approach
 
-1. **Load** the tactical ATD once and cache it as numpy arrays (`tactico/load.py`).
-2. **Features** per frame: each team's nearest player to the ball, ball visibility and speed,
-   ball outside the pitch, mean player speed (`tactico/features.py`).
-3. **Dead ball** = ball out of the pitch, or play stopped (players slow and ball missing or still),
-   or the lead-in to a Smart Tagging set piece; plus the published second-half gap before kickoff
-   (`tactico/deadball.py`).
-4. **Possession** = a state machine with hysteresis. A team becomes owner only after it has been
-   clearly closest to the ball for `SWITCH_FRAMES` frames in a row, and the change is dated back to
-   the start of that run. Loose balls and lost tracking keep the current owner
-   (`tactico/possession.py`).
+A gradient-boosted classifier gives P(H), P(A), P(D) for every frame from tracking features, and
+Viterbi decoding with a cost per change turns that into whole possessions (`tactico/ml.py`). It is
+trained only on external data: the seven DFL open matches, degraded to look like the competition's
+automatic tracking (`tools/train_ml.py`). The technical document is `Danish_AI-Tactico.md`.
 
-All parameters are in `tactico/config.py`.
+The earlier rule system (nearest player with hysteresis, dead-ball rules) is kept as the baseline:
+`python run.py` without `--model`.
 
 ## Reproduce
 
 ```bash
 pip install -r requirements.txt
 export MTAH_DATA_DIR=/path/to/data            # Windows: $env:MTAH_DATA_DIR = "C:\mtah-data"
-python run.py                                 # -> evaluation/results/Danish_AI-Tactico.csv
+pip install -r requirements-ml.txt
+python run.py --model models/possession.pkl   # -> evaluation/results/Danish_AI-Tactico.csv
 python evaluation/validate_submission.py evaluation/results/Danish_AI-Tactico.csv
 python evaluation/run_evaluation.py
 ```
