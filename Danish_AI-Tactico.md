@@ -1,7 +1,16 @@
 # Danish AI-Tactico: frame-level possession from automatic tracking
 
-More than a Hack 2027, Phase 1. Team: Aryan Rahman (lead), Allan Rahman, Ibrahim, Kiyan, William.
-Repository: https://github.com/<user>/danish-ai-tactico
+The formatted version of this document is `Danish_AI-Tactico.pdf`, submitted with the entry.
+
+More than a Hack 2027, Phase 1. Team Danish AI-Tactico, all students:
+
+- Aryan Abdel Rahman (team lead), MSc in Data Science, University of Southern Denmark (SDU)
+- Allan Abdel Rahman, Global Management and Manufacturing, University of Southern Denmark (SDU)
+- Ibraahim Dahir Xanaf, MSc in Data Science, University of Southern Denmark (SDU)
+- William Luu, BSc in Health Data, Technical University of Denmark (DTU)
+- Kiyan Rohanimanesh, PBA in Cybersecurity, UCL University College, Odense
+
+Repository: https://github.com/aryanarhmn/danish-ai-tactico
 
 ## Approach
 
@@ -12,7 +21,10 @@ per-frame guesses into whole possessions, which is what spellF1 rewards.
 
 The model is trained only on external data, as the organisers' clarification of 3 November
 requires. No parameter is fitted to the competition game, its ground truth or its video, and no
-hand-labelled data is used anywhere.
+hand-labelled data is used anywhere. Before that clarification we had tuned our rules on the public
+five minutes and on a few minutes we labelled by hand; when the rules were clarified we deleted the
+hand labels and the tools that made them, and redid everything on external data. The git history
+shows both stages.
 
 We started with a hand-written rule system (nearest player with hysteresis, plus dead-ball rules for
 ball out, whistles and restarts). It is still in the repository (`python run.py` without `--model`)
@@ -111,13 +123,12 @@ The external truth is not the competition truth. DFL marks about 26 possessions 
 while the public window of the competition game has 17, so the two providers probably differ in
 how quickly they hand possession over. The decoding cost absorbs part of this, but not all.
 
-Our degradation is a model of the automatic tracking, not a copy. It does not simulate identity
-switches, false detections or a ball tracked in the wrong place, and real gaps are not random:
-the ball is more likely lost in the air, in crowds and when it is dead.
+Our degradation is a model of the automatic tracking, not a copy. It places ball gaps by the players'
+speed, as measured, but it does not simulate identity switches, false detections or a ball tracked
+in the wrong place.
 
 With more time we would train a sequence model (a bidirectional recurrent network) on the same
-features, model where the ball goes missing instead of placing gaps at random, and add more
-external matches.
+features and add more external matches.
 
 ## Reproduction
 
