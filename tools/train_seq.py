@@ -1,0 +1,127 @@
+"""Train / cross-validate the GRU sequence model (tactico/seq.py) on EXTERNAL data only.
+
+    python tools/train_seq.py --dfl-dir C:\\mtah-ext\\dfl --sc-dir C:\\mtah-ext\\sc --cv
+    python tools/train_seq.py --dfl-dir C:\\mtah-ext\\dfl --sc-dir C:\\mtah-ext\\sc --save models\\sequence.pt
+
+--cv uses the same five folds as tools/cv_multi.py and reports the classifier alone, the GRU alone
+and their average, on held-out DFL (degraded) and SkillCorner matches.
+"""
+
+import argparse
+import os
+import sys
+import time
+
+import numpy as np
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+sys.path.insert(0, os.path.join(ROOT, "tools", "external"))
+from tactico import ml, seq  # noqa: E402
+import train_ml as T  # noqa: E402
+from cv_multi import sc_games  # noqa: E402
+
+COSTS = [(4.0, 16.0), (8.0, 16.0), (12.0, 16.0), (8.0, 24.0)]
+EPOCHS = 12
+
+
+def to32(games):
+    """float32 features to halve the memory (the classifier bins them anyway)."""
+    for g in games:
+        g["Xs"] = [x.astype(np.float32) for x in g["Xs"]]
+        g["X"] = g["Xs"][0]
+    return games
+
+
+def chunks(games, stats, rng):
+    """Training sequences (inputs, targets) at 5 fps, both team orders."""
+    k = len(ml.TEAM_FEATURES)
+    xs, ys = [], []
+    for g in games:
+        for Xg in g["Xs"]:
+            Z, _ = seq.prepare_inputs(Xg, stats)
+            for _, first, last in g["halves"]:
+                off = rng.integers(0, seq.STEP)
+                z = Z[first + off:last + 1:seq.STEP]
+                y = g["y"][first + off:last + 1:seq.STEP]
+                for s in range(0, len(z) - seq.CHUNK + 1, seq.CHUNK):
+                    zz, yy = z[s:s + seq.CHUNK], y[s:s + seq.CHUNK]
+                    xs += [zz, seq.swap_inputs(zz, k)]
+                    ys += [yy, np.where(yy == 2, 2, np.where(yy >= 0, 1 - yy, -1))]
+    return np.stack(xs), np.stack(ys).astype(np.int64)
+
+
+def fit_seq(games, seed=0, log=None):
+    import torch
+    torch.manual_seed(seed)
+    rng = np.random.default_rng(seed)
+    allX = np.concatenate([g["Xs"][0][g["y"] >= 0][::25] for g in games])
+    _, stats = seq.prepare_inputs(allX)
+    X, Y = chunks(games, stats, rng)
+    net = seq.build_net(X.shape[2])
+    opt = torch.optim.AdamW(net.parameters(), lr=2e-3, weight_decay=1e-4)
+    lossf = torch.nn.CrossEntropyLoss(ignore_index=-1)
+    Xt, Yt = torch.from_numpy(X), torch.from_numpy(Y)
+    n = len(Xt)
+    for ep in range(EPOCHS):
+        net.train()
+        perm = torch.randperm(n)
+        tot = 0.0
+        for b in range(0, n, 32):
+            idx = perm[b:b + 32]
+            opt.zero_grad()
+            loss = lossf(net(Xt[idx]).reshape(-1, 3), Yt[idx].reshape(-1))
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
+            opt.step()
+            tot += float(loss) * len(idx)
+        if log:
+            log("    epoch {} loss {:.3f}".format(ep + 1, tot / n))
+    net.eval()
+    return {"net": net, "stats": stats}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--dfl-dir")
+    parser.add_argument("--sc-dir")
+    parser.add_argument("--cv", action="store_true")
+    parser.add_argument("--folds", type=int, default=5)
+    parser.add_argument("--only-folds", type=int, default=None, help="run only the first N folds")
+    parser.add_argument("--epochs", type=int, default=12)
+    parser.add_argument("--save")
+    args = parser.parse_args()
+    import torch
+    globals()["EPOCHS"] = args.epochs
+    t0 = time.time()
+    log = lambda m: print(m + " ({:.0f} s)".format(time.time() - t0), flush=True)  # noqa: E731
+    dfl_train = to32(T.prepare("dfl", None, args.dfl_dir, T.parse_mix(T.TRAIN_MIX))[0])
+    sc = to32(sc_games(args.sc_dir)) if args.sc_dir else []
+    if args.cv:
+        dfl_test = to32(T.prepare("dfl", None, args.dfl_dir, T.parse_mix(T.TEST_MIX), seed_base=500)[0])
+        fold_d = [i % args.folds for i in range(len(dfl_train))]
+        fold_s = [(i + 2) % args.folds for i in range(len(sc))]
+        res = {k: {c: [] for c in COSTS} for k in ("hgb|D", "gru|D", "avg|D", "hgb|S", "gru|S", "avg|S")}
+        for f in range(args.only_folds or args.folds):
+            tr = [g for g, k in zip(dfl_train, fold_d) if k != f] + [g for g, k in zip(sc, fold_s) if k != f]
+            te = [("D", g) for g, k in zip(dfl_test, fold_d) if k == f] + [("S", g) for g, k in zip(sc, fold_s) if k == f]
+            m1 = T.fit(tr)
+            m2 = fit_seq(tr, log=log)
+            for tag, g in te:
+                p1 = ml.predict_proba(m1, g["X"])
+                p2 = seq.predict_proba(m2, g["X"], g["halves"])
+                for name, p in (("hgb", p1), ("gru", p2), ("avg", (p1 + p2) / 2)):
+                    for c in COSTS:
+                        res[name + "|" + tag][c].append(T.score(g["labels"], ml.label(p, g["halves"], *c)))
+            log("  fold {} done".format(f))
+        for key, r in res.items():
+            T.report(r, key)
+    if args.save:
+        b = fit_seq(dfl_train + sc, log=log)
+        torch.save({"state": b["net"].state_dict(), "stats": b["stats"], "n_in": 2 * len(ml.FEATURE_NAMES)}, args.save)
+        print("saved", args.save)
+
+
+if __name__ == "__main__":
+    main()

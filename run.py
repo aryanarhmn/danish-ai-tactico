@@ -5,6 +5,7 @@
     python run.py --no-tagging                      # ignore Smart Tagging
     python run.py --refresh                         # re-parse the ATD instead of using the cache
     python run.py --model models/possession.pkl     # learned model instead of the rules
+    python run.py --model models/possession.pkl --seq models/sequence.pt   # classifier + GRU average
 
 Deterministic: same data in, byte-identical file out. All tunable numbers are in tactico/config.py.
 """
@@ -64,6 +65,8 @@ def main():
     parser.add_argument("--no-lost", action="store_true")
     parser.add_argument("--refresh", action="store_true")
     parser.add_argument("--model", help="learned model from tools/train_ml.py (external data only)")
+    parser.add_argument("--seq", help="GRU from tools/train_seq.py; its probabilities are averaged "
+                        "with the classifier's before decoding (needs --model and torch)")
     parser.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
                         help="override a value in tactico/config.py for this run, e.g. --set CONTROL_MARGIN_M=1.0")
     args = parser.parse_args()
@@ -113,6 +116,10 @@ def main():
         if names != bundle["features"]:
             raise SystemExit("model was trained on other features; retrain it")
         prob = ml.predict_proba(bundle["model"], X)
+        if args.seq:
+            from tactico import seq
+            prob = (prob + seq.predict_proba(seq.load(args.seq), X.astype(np.float32), halves)) / 2
+            print("sequence model {} (averaged with the classifier)".format(os.path.basename(args.seq)))
         labels = ml.label(prob, halves, bundle["switch_cost"], bundle["dead_cost"])
         gap = np.zeros(len(labels), dtype=bool)
         gap[deadball.SECOND_HALF_GRADED_FROM:deadball.SECOND_HALF_KICKOFF] = True
