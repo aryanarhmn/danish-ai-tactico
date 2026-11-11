@@ -107,8 +107,8 @@ restart starts with a clear possessor. Dead ball runs from the moment play stops
 is taken. The second-half block before kick-off (frames 110808 to 113741) is always `D`.
 
 The two decoding costs (switching team, entering or leaving a dead ball) were chosen by
-leave-one-match-out cross-validation on the DFL matches. Results change little across a wide range
-of costs.
+cross-validation on the external matches, together with the blend of the two models (see Results).
+They are 4 and 12. Results change little across a wide range of costs.
 
 ## Results on external data
 
@@ -147,7 +147,24 @@ trained on the same matches. Same five folds, same decoding costs (8 and 16):
 | DFL (7 matches, degraded) | 0.521 | 0.545 | **0.551** |
 | SkillCorner (20 matches) | 0.468 | 0.481 | **0.493** |
 
-The average beats the classifier on 25 of the 27 held-out matches, so the submission uses it.
+The average beats the classifier on 25 of the 27 held-out matches.
+
+**Tuning the blend.** The same five folds were run again with three GRUs per fold (seeds 0, 1, 2),
+and the held-out probabilities were saved (`tools/train_seq.py --dump`). `tools/blend_cv.py` then
+decoded every combination of 1 or 3 GRUs, GRU weight 0.5 to 1.0 and decoding costs 2 to 12 (switch)
+and 8 to 24 (dead ball). The criterion was fixed beforehand: the mean of the DFL mean and the
+SkillCorner mean.
+
+| Setting | DFL | SkillCorner | Criterion |
+|---|---|---|---|
+| 1 GRU, weight 0.5, costs 8/16 (previous) | 0.550 | 0.494 | 0.522 |
+| 3 GRUs, weight 0.5, costs 4/12 | 0.556 | 0.498 | 0.527 |
+| 3 GRUs, weight 0.8, costs 4/12 (submitted) | **0.572** | **0.499** | **0.535** |
+
+The top of the table is flat: GRU weights 0.7 to 0.8 with switch costs 2 to 4 and dead-ball costs
+8 to 12 all score 0.535 within 0.001, so we took a setting in the middle of that plateau. It beats
+the previous setting on 20 of the 27 held-out matches. Three seeds matter once the GRU carries most
+of the weight: with one GRU, weight 0.8 scores 0.524.
 
 We also tried a second stage that sees the first stage's probabilities over 30 seconds before
 and after each frame (`tools/stack_cv.py`). It scored the same on DFL (0.568) and 0.014 higher on
@@ -168,7 +185,7 @@ speed, as measured, but it does not simulate identity switches, false detections
 in the wrong place.
 
 We did not test the GRU on the Metrica games. With more time we would add more external matches of
-automatic tracking and average several GRUs trained from different seeds.
+automatic tracking and try a larger GRU.
 
 ## Reproduction
 
@@ -180,12 +197,15 @@ python tools/external/dfl_open.py --out C:/mtah-ext/dfl            # downloads a
 python tools/external/skillcorner_open.py --src C:/mtah-ext/skillcorner/data/matches --out C:/mtah-ext/sc
 python tools/cv_multi.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --sample-dir C:/mtah-ext/sample-data   # optional
 python tools/train_ml.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --save models/possession.pkl --switch-cost 8 --dead-cost 16
-python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --epochs 6 --save models/sequence.pt
-python run.py --model models/possession.pkl --seq models/sequence.pt   # -> evaluation/results/Danish_AI-Tactico.csv
+python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --cv --seeds 3 --dump C:/mtah-ext/dump   # optional
+python tools/blend_cv.py C:/mtah-ext/dump                                                                       # optional
+python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --epochs 6 --seeds 3 --save models/sequence.pt
+python run.py --model models/possession.pkl --seq models/sequence.pt --seq-weight 0.8 --switch-cost 4 --dead-cost 12
 python evaluation/validate_submission.py evaluation/results/Danish_AI-Tactico.csv
 ```
 
 Both trained models are committed in `models/`, so
-`python run.py --model models/possession.pkl --seq models/sequence.pt` reproduces the submitted file
+`python run.py --model models/possession.pkl --seq models/sequence.pt --seq-weight 0.8 --switch-cost 4 --dead-cost 12`
+reproduces the submitted file
 byte for byte without retraining. The GRU runs on one CPU thread, so its sums come out the same on
 every run.

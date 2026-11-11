@@ -75,7 +75,7 @@ def fit_seq(games, seed=0, log=None):
             loss.backward()
             torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
             opt.step()
-            tot += float(loss) * len(idx)
+            tot += float(loss.detach()) * len(idx)
         if log:
             log("    epoch {} loss {:.3f}".format(ep + 1, tot / n))
     net.eval()
@@ -91,6 +91,9 @@ def main():
     parser.add_argument("--only-folds", type=int, default=None, help="run only the first N folds")
     parser.add_argument("--epochs", type=int, default=12)
     parser.add_argument("--save")
+    parser.add_argument("--seeds", type=int, default=1, help="GRUs per fold / in the saved ensemble")
+    parser.add_argument("--dump", help="with --cv: save each fold's held-out probabilities here "
+                        "(one pickle per fold; folds already saved are skipped)")
     args = parser.parse_args()
     import torch
     globals()["EPOCHS"] = args.epochs
@@ -104,22 +107,39 @@ def main():
         fold_s = [(i + 2) % args.folds for i in range(len(sc))]
         res = {k: {c: [] for c in COSTS} for k in ("hgb|D", "gru|D", "avg|D", "hgb|S", "gru|S", "avg|S")}
         for f in range(args.only_folds or args.folds):
+            if args.dump:
+                import pickle
+                os.makedirs(args.dump, exist_ok=True)
+                out = os.path.join(args.dump, "fold{}.pkl".format(f))
+                if os.path.exists(out):
+                    log("  fold {} already saved".format(f))
+                    continue
             tr = [g for g, k in zip(dfl_train, fold_d) if k != f] + [g for g, k in zip(sc, fold_s) if k != f]
             te = [("D", g) for g, k in zip(dfl_test, fold_d) if k == f] + [("S", g) for g, k in zip(sc, fold_s) if k == f]
             m1 = T.fit(tr)
-            m2 = fit_seq(tr, log=log)
+            m2s = [fit_seq(tr, seed=k, log=log) for k in range(args.seeds)]
+            dump = []
             for tag, g in te:
                 p1 = ml.predict_proba(m1, g["X"])
-                p2 = seq.predict_proba(m2, g["X"], g["halves"])
+                p2s = [seq.predict_proba(m, g["X"], g["halves"]) for m in m2s]
+                p2 = np.mean(p2s, axis=0)
+                if args.dump:
+                    dump.append({"tag": tag, "name": g["name"], "p_hgb": p1.astype(np.float32),
+                                 "p_gru": np.stack(p2s).astype(np.float32), "labels": g["labels"],
+                                 "halves": g["halves"]})
                 for name, p in (("hgb", p1), ("gru", p2), ("avg", (p1 + p2) / 2)):
                     for c in COSTS:
                         res[name + "|" + tag][c].append(T.score(g["labels"], ml.label(p, g["halves"], *c)))
+            if args.dump:
+                with open(out, "wb") as handle:
+                    pickle.dump(dump, handle)
             log("  fold {} done".format(f))
         for key, r in res.items():
             T.report(r, key)
     if args.save:
-        b = fit_seq(dfl_train + sc, log=log)
-        torch.save({"state": b["net"].state_dict(), "stats": b["stats"], "n_in": 2 * len(ml.FEATURE_NAMES)}, args.save)
+        nets = [fit_seq(dfl_train + sc, seed=k, log=log) for k in range(args.seeds)]
+        torch.save({"states": [b["net"].state_dict() for b in nets], "stats": nets[0]["stats"],
+                    "n_in": 2 * len(ml.FEATURE_NAMES)}, args.save)
         print("saved", args.save)
 
 

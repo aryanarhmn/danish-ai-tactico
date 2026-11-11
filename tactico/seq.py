@@ -77,10 +77,13 @@ def load(path):
     """Bundle saved by tools/train_seq.py --save."""
     import torch
     saved = torch.load(path, map_location="cpu", weights_only=False)
-    net = build_net(saved["n_in"])
-    net.load_state_dict(saved["state"])
-    net.eval()
-    return {"net": net, "stats": saved["stats"]}
+    nets = []
+    for state in saved.get("states") or [saved["state"]]:
+        net = build_net(saved["n_in"])
+        net.load_state_dict(state)
+        net.eval()
+        nets.append(net)
+    return {"nets": nets, "stats": saved["stats"]}
 
 
 def predict_proba(bundle, X, halves):
@@ -88,14 +91,16 @@ def predict_proba(bundle, X, halves):
     import torch
     from tactico import ml
     torch.set_num_threads(1)            # one thread: the same sums in the same order on every run
-    net = bundle["net"]
-    net.eval()
+    nets = bundle.get("nets") or [bundle["net"]]
     n_team = len(ml.TEAM_FEATURES)
     Z, _ = prepare_inputs(X, bundle["stats"])
     out = np.full((len(X), 3), 1.0 / 3, dtype=np.float32)
     for _, first, last in halves:
         z = Z[first:last + 1]
-        p1 = predict_half(net, z)
-        p2 = predict_half(net, swap_inputs(z, n_team))[:, [1, 0, 2]]
-        out[first:last + 1] = (p1 + p2) / 2
+        zs = swap_inputs(z, n_team)
+        acc = np.zeros((len(z), 3), dtype=np.float32)
+        for net in nets:              # several seeds: plain average
+            net.eval()
+            acc += (predict_half(net, z) + predict_half(net, zs)[:, [1, 0, 2]]) / 2
+        out[first:last + 1] = acc / len(nets)
     return out

@@ -6,6 +6,7 @@
     python run.py --refresh                         # re-parse the ATD instead of using the cache
     python run.py --model models/possession.pkl     # learned model instead of the rules
     python run.py --model models/possession.pkl --seq models/sequence.pt   # classifier + GRU average
+    python run.py --model models/possession.pkl --seq models/sequence.pt --seq-weight 0.8 --switch-cost 4 --dead-cost 12
 
 Deterministic: same data in, byte-identical file out. All tunable numbers are in tactico/config.py.
 """
@@ -67,6 +68,10 @@ def main():
     parser.add_argument("--model", help="learned model from tools/train_ml.py (external data only)")
     parser.add_argument("--seq", help="GRU from tools/train_seq.py; its probabilities are averaged "
                         "with the classifier's before decoding (needs --model and torch)")
+    parser.add_argument("--seq-weight", type=float, default=0.5,
+                        help="weight of the GRU in the average (tools/blend_cv.py chose 0.8)")
+    parser.add_argument("--switch-cost", type=float, help="override the decoding cost stored in --model")
+    parser.add_argument("--dead-cost", type=float, help="override the decoding cost stored in --model")
     parser.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
                         help="override a value in tactico/config.py for this run, e.g. --set CONTROL_MARGIN_M=1.0")
     args = parser.parse_args()
@@ -118,8 +123,13 @@ def main():
         prob = ml.predict_proba(bundle["model"], X)
         if args.seq:
             from tactico import seq
-            prob = (prob + seq.predict_proba(seq.load(args.seq), X.astype(np.float32), halves)) / 2
-            print("sequence model {} (averaged with the classifier)".format(os.path.basename(args.seq)))
+            w = args.seq_weight
+            prob = (1 - w) * prob + w * seq.predict_proba(seq.load(args.seq), X.astype(np.float32), halves)
+            print("sequence model {} (weight {} in the average)".format(os.path.basename(args.seq), w))
+        if args.switch_cost is not None:
+            bundle["switch_cost"] = args.switch_cost
+        if args.dead_cost is not None:
+            bundle["dead_cost"] = args.dead_cost
         labels = ml.label(prob, halves, bundle["switch_cost"], bundle["dead_cost"])
         gap = np.zeros(len(labels), dtype=bool)
         gap[deadball.SECOND_HALF_GRADED_FROM:deadball.SECOND_HALF_KICKOFF] = True
