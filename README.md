@@ -1,58 +1,117 @@
-# Danish AI-Tactico — More than a Hack 2027, Phase 1
+# Danish AI-Tactico
 
-Frame-level ball possession for FC Barcelona vs Athletic Club, built on Metrica Sports'
+Our entry for More than a Hack 2027, Phase 1: label every frame of FC Barcelona vs Athletic Club
+as Barça (`H`), Athletic (`A`), dead ball (`D`) or no call (`X`), from automatic tracking where the
+ball is missing on four frames in ten.
+
+The repository is built on Metrica Sports'
 [challenge repository](https://github.com/metrica-sports/more-than-a-hack-2027). Their files are
-kept unchanged (`games.py`, `evaluation/`, `starter/`, docs; their README is `README_metrica.md`).
+unchanged (`games.py`, `evaluation/`, `starter/` and the docs; their README is now
+`README_metrica.md`). Our write-up is [`Danish_AI-Tactico.md`](Danish_AI-Tactico.md).
 
-## Approach
+![Pipeline: tracking, features, two models, Viterbi decoder](docs/pipeline.png)
 
-A gradient-boosted classifier gives P(H), P(A), P(D) for every frame from tracking features, and
-Viterbi decoding with a cost per change turns that into whole possessions (`tactico/ml.py`). It is
-trained only on external data: the seven DFL open matches, degraded to look like the competition's
-automatic tracking (`tools/train_ml.py`). The technical document is `Danish_AI-Tactico.md`.
+## How it works
 
-The earlier rule system (nearest player with hysteresis, dead-ball rules) is kept as the baseline:
-`python run.py` without `--model`.
+Every frame becomes 67 numbers: distances from the ball to each team, how far each team is pushed
+up and how spread out it is, how fast the players move, and how long the ball has been missing.
+Both teams get the same block of features, and the models see both orders, so they cannot learn
+anything about which side is the home team.
 
-## Reproduce
+Two models turn those numbers into probabilities. A gradient-boosted classifier looks at a few
+seconds around the frame. Three bidirectional GRUs, trained from different seeds, read the whole
+half and can carry what happened before a long gap in the ball tracking. We average them with a
+weight of 0.8 on the GRUs. A Viterbi decoder then charges a cost for every change of label, which
+turns the per-frame guesses into whole possessions.
+
+Nothing is fitted to the competition match, its ground truth or its video. All training and tuning
+uses external data:
+
+| Data | Licence | Use |
+|---|---|---|
+| [DFL / Sportec open data](https://doi.org/10.6084/m9.figshare.28196177), 7 Bundesliga matches | CC BY 4.0 | training, degraded to look like the competition tracking |
+| [SkillCorner open data](https://github.com/SkillCorner/opendata), 20 A-League matches | MIT | training; real automatic tracking with real gaps |
+| [Metrica sample data](https://github.com/metrica-sports/sample-data), 3 matches | public | test set only |
+
+The DFL tracking is clean, so we remove the ball where the competition tracker loses it. We measured
+that with two scripts that print summary numbers only: the ball is missing on 41 % of frames, and
+mostly when the players walk (80 % below 1 m/s, 11 % above 2 m/s).
+
+## Results on external matches
+
+spellF1 on matches the models were not trained on, five-fold cross-validation:
+
+| Held out | Classifier, DFL only | Classifier, DFL + SkillCorner | Submitted (classifier + 3 GRUs) |
+|---|---|---|---|
+| DFL, 7 matches | 0.565 | 0.521 | **0.572** |
+| SkillCorner, 20 matches | 0.306 | 0.468 | **0.499** |
+
+The first column shows why we added SkillCorner: a model trained only on clean data falls apart on
+real automatic tracking. The blend weight and the decoding costs (4 per change of team, 12 in or
+out of a dead ball) were picked on these folds with `tools/blend_cv.py`.
+
+![Three minutes of a held-out Bundesliga match: truth, our model and the rule system](docs/timeline.png)
+
+## Reproduce the submitted file
+
+The trained models are in `models/`, so you only need the competition data. We used Python 3.11,
+and `requirements-ml.txt` pins the library versions that produced the file.
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-ml.txt
 export MTAH_DATA_DIR=/path/to/data            # Windows: $env:MTAH_DATA_DIR = "C:\mtah-data"
-pip install -r requirements-ml.txt
-python run.py --model models/possession.pkl   # -> evaluation/results/Danish_AI-Tactico.csv
+python run.py --model models/possession.pkl --seq models/sequence.pt --seq-weight 0.8 --switch-cost 4 --dead-cost 12
 python evaluation/validate_submission.py evaluation/results/Danish_AI-Tactico.csv
-python evaluation/run_evaluation.py
 ```
 
-The output is deterministic: running it twice gives a byte-identical file.
+This writes `evaluation/results/Danish_AI-Tactico.csv`. Two runs give the same file byte for byte.
 
-## Tuning on external data
-
-Every number in `tactico/config.py` is tuned on external data only, as the organisers' rules
-require: Metrica Sports' three public sample games
-([metrica-sports/sample-data](https://github.com/metrica-sports/sample-data), used with
-acknowledgement of the source). Those games have no possession ground truth, so
-`tools/external/metrica_sample.py` derives labels from their event data, and
-`tools/tune_external.py` scores each parameter variant on all three games with the competition
-scorer and prints the mean.
+## Retrain from the external data
 
 ```bash
-git clone --depth 1 https://github.com/metrica-sports/sample-data.git ../sample-data
-python tools/tune_external.py --sample-dir ../sample-data --grid poss
-python tools/tune_external.py --sample-dir ../sample-data --grid poss --noise 0.3
+git clone --depth 1 https://github.com/metrica-sports/sample-data.git C:/mtah-ext/sample-data
+git clone --depth 1 https://github.com/SkillCorner/opendata.git C:/mtah-ext/skillcorner
+python tools/external/dfl_open.py --out C:/mtah-ext/dfl
+python tools/external/skillcorner_open.py --src C:/mtah-ext/skillcorner/data/matches --out C:/mtah-ext/sc
+
+python tools/train_ml.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --save models/possession.pkl --switch-cost 8 --dead-cost 16
+python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --epochs 6 --seeds 3 --save models/sequence.pt
 ```
 
-Two differences from the competition data are handled explicitly: the sample games drop the ball
-from the tracking while it is dead, so long ball gaps are filled by interpolation (otherwise a
-tuner learns "no ball = dead ball"); and their tracking is corrected, so `--noise` adds simulated
-position error to check that a choice also holds on noisier tracking.
+The cross-validation behind the numbers above:
 
-No hand labels are used anywhere, and nothing is tuned on the competition game, its ground truth
-or its video. The video was only watched to understand what counts as possession and a dead ball,
-which shaped which rules exist.
+```bash
+python tools/cv_multi.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --sample-dir C:/mtah-ext/sample-data
+python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --cv --seeds 3 --dump C:/mtah-ext/dump
+python tools/blend_cv.py C:/mtah-ext/dump
+```
+
+Retraining on another machine or library version can give slightly different models. The
+committed ones produced the submission.
+
+## Where things are
+
+| Path | What |
+|---|---|
+| `run.py` | builds the submission file |
+| `tactico/ml.py` | features, classifier wrapper, Viterbi decoder |
+| `tactico/seq.py` | the GRU |
+| `tools/train_ml.py`, `tools/train_seq.py` | training and cross-validation |
+| `tools/blend_cv.py` | picks the blend weight and decoding costs |
+| `tools/external/` | download and convert DFL, SkillCorner and Metrica data |
+| `tools/noise_match.py`, `tools/gap_profile.py` | measure the competition tracking (summary numbers only) |
+| `models/` | the trained models used for the submission |
+
+The earlier rule system (nearest player with hysteresis plus dead-ball rules) still runs with
+`python run.py` without `--model`. We kept it as a baseline.
 
 ## Data
 
-The match data is not in this repository and must not be: `data/` and `cache/` are
-gitignored.
+The match data is not in this repository: `data/` and `cache/` are gitignored. External data is
+downloaded by the scripts above and is not committed either.
+
+## Team
+
+Aryan Abdel Rahman (team lead), Allan Abdel Rahman, Ibraahim Dahir Xanaf, William Luu and Kiyan
+Rohanimanesh. Students at the University of Southern Denmark, the Technical University of Denmark
+and UCL University College, Odense.

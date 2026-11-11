@@ -25,7 +25,7 @@ what spellF1 rewards.
 The model is trained only on external data, as the organisers' clarification of 3 November
 requires. No parameter is fitted to the competition game, its ground truth or its video, and no
 hand-labelled data is used anywhere. Before that clarification we had tuned our rules on the public
-five minutes and on a few minutes we labelled by hand; when the rules were clarified we deleted the
+five minutes and on a few minutes we labelled by hand. When the rules were clarified we deleted the
 hand labels and the tools that made them, and redid everything on external data. The git history
 shows both stages.
 
@@ -60,12 +60,12 @@ The video was watched only to understand what counts as possession and a dead ba
   (github.com/metrica-sports/sample-data). They have no possession truth, so we derive labels from
   the events. We use these matches only as a second, independent test set.
 
-**Making clean data look like the competition data.** External tracking is corrected; the
+**Making clean data look like the competition data.** External tracking is corrected, while the
 competition tracking is automatic. Two scripts measure the provided tracking with automatic checks
 that print summary numbers only (no ground truth, no video). `tools/noise_match.py`: the ball is
 missing on 41 % of the frames inside the halves, in 150 gaps with a mean of 17 s and a median of
-11 s; positions are very smooth (about 1 cm of frame-to-frame jitter on the ball); about 10.2 of 11
-players per team are in view; speeds are in m/s. `tools/gap_profile.py`: the ball is missing on
+11 s. Positions are very smooth (about 1 cm of frame-to-frame jitter on the ball), about 10.2 of 11
+players per team are in view, and speeds are in m/s. `tools/gap_profile.py`: the ball is missing on
 80 % of frames where the players' mean speed is below 1 m/s, 42 % at 1 to 2 m/s and 11 % above
 2 m/s. The tracker loses the ball mostly around stoppages.
 
@@ -94,9 +94,9 @@ Shared: whether the ball is tracked and for how long it has been missing, ball s
 the last and next second, distance to the touchline and goal line, ball outside the pitch, mean
 player speed over 2, 5 and 15 second windows before and after the frame.
 
-Many of these work without the ball. The team in possession pushes up and spreads out; the
-defending team drops and narrows; at a stoppage everyone slows down. That matters when the ball is
-missing on four frames in ten, often for 10 to 30 seconds at a time.
+Many of these work without the ball. The team in possession pushes up and spreads out, the
+defending team drops and narrows, and at a stoppage everyone slows down. The ball is missing on four
+frames in ten, often for 10 to 30 seconds at a time, so these signals carry a lot of the work.
 
 ## Possession rules
 
@@ -125,8 +125,8 @@ The model wins on every one of the ten matches.
 **Why we also train on SkillCorner.** DFL and Metrica are both corrected tracking, which we degrade
 ourselves. When we tested the DFL-trained model on the SkillCorner matches, which come from a real
 automatic tracker, it fell to 0.306. So we compared two models with five-fold cross-validation
-over all thirty matches (`tools/cv_multi.py`; every fold holds out DFL and SkillCorner matches the
-model has not seen):
+over all thirty matches (`tools/cv_multi.py`). Every fold holds out DFL and SkillCorner matches the
+model has not seen.
 
 | Held out | Trained on DFL | Trained on DFL + SkillCorner |
 |---|---|---|
@@ -170,8 +170,8 @@ We also tried a second stage that sees the first stage's probabilities over 30 s
 and after each frame (`tools/stack_cv.py`). It scored the same on DFL (0.568) and 0.014 higher on
 the Metrica games, too little to justify a second model, so we left it out. Earlier we tried, and
 dropped, a rule that the ball must move with the player and rules for goals and for a ball lost at
-the line; none helped on external data. We report no score on the competition game: its
-public five minutes were not used to choose or tune anything.
+the line. None of them helped on external data. We report no score on the competition game, because
+its public five minutes were not used to choose or tune anything.
 
 ## Limitations
 
@@ -180,7 +180,7 @@ SkillCorner about 15, while CHALLENGE.md gives 17 for the public window of the c
 providers differ in how quickly they hand possession over. Training on both puts the model between
 the two, and the decoding cost absorbs part of the rest, but not all.
 
-Our degradation is a model of the automatic tracking, not a copy. It places ball gaps by the players'
+Our degradation is an incomplete model of the automatic tracking. It places ball gaps by the players'
 speed, as measured, but it does not simulate identity switches, false detections or a ball tracked
 in the wrong place.
 
