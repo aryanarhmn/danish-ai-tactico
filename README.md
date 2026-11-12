@@ -31,6 +31,7 @@ uses external data:
 |---|---|---|
 | [DFL / Sportec open data](https://doi.org/10.6084/m9.figshare.28196177), 7 Bundesliga matches | CC BY 4.0 | training, degraded to look like the competition tracking |
 | [SkillCorner open data](https://github.com/SkillCorner/opendata), 20 A-League matches | MIT | training; real automatic tracking with real gaps |
+| SkillCorner's 2020 release, 9 European matches (same repository, git history) | MIT | training only; labels only where a player has the ball |
 | [Metrica sample data](https://github.com/metrica-sports/sample-data), 3 matches | public | test set only |
 
 The DFL tracking is clean, so we remove the ball where the competition tracker loses it. We measured
@@ -73,16 +74,18 @@ git clone --depth 1 https://github.com/metrica-sports/sample-data.git C:/mtah-ex
 git clone --depth 1 https://github.com/SkillCorner/opendata.git C:/mtah-ext/skillcorner
 python tools/external/dfl_open.py --out C:/mtah-ext/dfl
 python tools/external/skillcorner_open.py --src C:/mtah-ext/skillcorner/data/matches --out C:/mtah-ext/sc
+git clone --filter=blob:none --no-checkout https://github.com/SkillCorner/opendata.git C:/mtah-ext/sc-old-repo
+python tools/external/skillcorner_old.py --repo C:/mtah-ext/sc-old-repo --out C:/mtah-ext/sc-old
 
-python tools/train_ml.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --save models/possession.pkl --switch-cost 8 --dead-cost 16
-python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --epochs 6 --seeds 3 --save models/sequence.pt
+python tools/train_ml.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --extra-dir C:/mtah-ext/sc-old --save models/possession.pkl --switch-cost 8 --dead-cost 16
+python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --extra-dir C:/mtah-ext/sc-old --epochs 6 --seeds 3 --save models/sequence.pt
 ```
 
 The cross-validation behind the numbers above:
 
 ```bash
 python tools/cv_multi.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --sample-dir C:/mtah-ext/sample-data
-python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --cv --seeds 3 --dump C:/mtah-ext/dump
+python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --extra-dir C:/mtah-ext/sc-old --cv --seeds 3 --dump C:/mtah-ext/dump
 python tools/blend_cv.py C:/mtah-ext/dump
 ```
 

@@ -27,11 +27,14 @@ import train_ml as T  # noqa: E402
 COSTS = [(4.0, 16.0), (8.0, 8.0), (8.0, 16.0), (12.0, 16.0), (8.0, 24.0), (16.0, 24.0)]
 
 
-def sc_games(folder):
+def sc_games(folder, f32=False):
+    """One entry per .npz match. f32=True stores the features as float32, half the memory."""
     out = []
     for p in dfl_open.list_matches(folder):
         d = dfl_open.load_match(p)
         X, _ = ml.features(d)
+        if f32:
+            X = X.astype(np.float32)
         y = np.array([T.CODE.get(v, -1) for v in d["labels"]], dtype=np.int8)
         out.append({"name": "S" + os.path.basename(p)[3:-4], "X": X, "Xs": [X], "y": y,
                     "labels": d["labels"], "halves": d["halves"]})

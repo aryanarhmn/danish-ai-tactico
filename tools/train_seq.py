@@ -35,21 +35,35 @@ def to32(games):
 
 
 def chunks(games, stats, rng):
-    """Training sequences (inputs, targets) at 5 fps, both team orders."""
+    """Training sequences (inputs, targets) at 5 fps, both team orders.
+
+    Two passes so the output is allocated once (a list plus np.stack held everything twice). Same
+    random offsets, same order and same values as the one-pass version."""
     k = len(ml.TEAM_FEATURES)
-    xs, ys = [], []
+    plan, total = [], 0
     for g in games:
-        for Xg in g["Xs"]:
-            Z, _ = seq.prepare_inputs(Xg, stats)
+        for j in range(len(g["Xs"])):
             for _, first, last in g["halves"]:
-                off = rng.integers(0, seq.STEP)
-                z = Z[first + off:last + 1:seq.STEP]
-                y = g["y"][first + off:last + 1:seq.STEP]
-                for s in range(0, len(z) - seq.CHUNK + 1, seq.CHUNK):
-                    zz, yy = z[s:s + seq.CHUNK], y[s:s + seq.CHUNK]
-                    xs += [zz, seq.swap_inputs(zz, k)]
-                    ys += [yy, np.where(yy == 2, 2, np.where(yy >= 0, 1 - yy, -1))]
-    return np.stack(xs), np.stack(ys).astype(np.int64)
+                off = int(rng.integers(0, seq.STEP))
+                n_steps = len(range(first + off, last + 1, seq.STEP))
+                n_chunks = (n_steps - seq.CHUNK) // seq.CHUNK + 1 if n_steps >= seq.CHUNK else 0
+                plan.append((g, j, first + off, last, n_chunks))
+                total += 2 * n_chunks
+    n_in = 2 * games[0]["Xs"][0].shape[1]
+    X = np.empty((total, seq.CHUNK, n_in), dtype=np.float32)
+    Y = np.empty((total, seq.CHUNK), dtype=np.int64)
+    i = 0
+    for g, j, start, last, n_chunks in plan:
+        if not n_chunks:
+            continue
+        z, _ = seq.prepare_inputs(g["Xs"][j][start:last + 1:seq.STEP], stats)
+        y = g["y"][start:last + 1:seq.STEP]
+        for c in range(n_chunks):
+            zz, yy = z[c * seq.CHUNK:(c + 1) * seq.CHUNK], y[c * seq.CHUNK:(c + 1) * seq.CHUNK]
+            X[i], X[i + 1] = zz, seq.swap_inputs(zz, k)
+            Y[i], Y[i + 1] = yy, np.where(yy == 2, 2, np.where(yy >= 0, 1 - yy, -1))
+            i += 2
+    return X, Y
 
 
 def fit_seq(games, seed=0, log=None):
@@ -86,6 +100,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dfl-dir")
     parser.add_argument("--sc-dir")
+    parser.add_argument("--extra-dir", help="more .npz matches used for training only, in every fold "
+                        "(tools/external/skillcorner_old.py)")
     parser.add_argument("--cv", action="store_true")
     parser.add_argument("--folds", type=int, default=5)
     parser.add_argument("--only-folds", type=int, default=None, help="run only the first N folds")
@@ -100,7 +116,8 @@ def main():
     t0 = time.time()
     log = lambda m: print(m + " ({:.0f} s)".format(time.time() - t0), flush=True)  # noqa: E731
     dfl_train = to32(T.prepare("dfl", None, args.dfl_dir, T.parse_mix(T.TRAIN_MIX))[0])
-    sc = to32(sc_games(args.sc_dir)) if args.sc_dir else []
+    sc = sc_games(args.sc_dir, f32=True) if args.sc_dir else []
+    extra = sc_games(args.extra_dir, f32=True) if args.extra_dir else []
     if args.cv:
         dfl_test = to32(T.prepare("dfl", None, args.dfl_dir, T.parse_mix(T.TEST_MIX), seed_base=500)[0])
         fold_d = [i % args.folds for i in range(len(dfl_train))]
@@ -114,7 +131,7 @@ def main():
                 if os.path.exists(out):
                     log("  fold {} already saved".format(f))
                     continue
-            tr = [g for g, k in zip(dfl_train, fold_d) if k != f] + [g for g, k in zip(sc, fold_s) if k != f]
+            tr = [g for g, k in zip(dfl_train, fold_d) if k != f] + [g for g, k in zip(sc, fold_s) if k != f] + extra
             te = [("D", g) for g, k in zip(dfl_test, fold_d) if k == f] + [("S", g) for g, k in zip(sc, fold_s) if k == f]
             m1 = T.fit(tr)
             m2s = [fit_seq(tr, seed=k, log=log) for k in range(args.seeds)]
@@ -137,7 +154,7 @@ def main():
         for key, r in res.items():
             T.report(r, key)
     if args.save:
-        nets = [fit_seq(dfl_train + sc, seed=k, log=log) for k in range(args.seeds)]
+        nets = [fit_seq(dfl_train + sc + extra, seed=k, log=log) for k in range(args.seeds)]
         torch.save({"states": [b["net"].state_dict() for b in nets], "stats": nets[0]["stats"],
                     "n_in": 2 * len(ml.FEATURE_NAMES)}, args.save)
         print("saved", args.save)

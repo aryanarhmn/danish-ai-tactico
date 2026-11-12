@@ -121,6 +121,7 @@ def main():
     parser.add_argument("--dfl-dir")
     parser.add_argument("--sc-dir", help="SkillCorner .npz folder (tools/external/skillcorner_open.py); "
                         "added to the training matches as they are, without degradation")
+    parser.add_argument("--extra-dir", help="more .npz matches for training only (tools/external/skillcorner_old.py)")
     parser.add_argument("--sample-dir")
     parser.add_argument("--train-mix", default=TRAIN_MIX,
                         help="degradations to train on, noise:ball_missing:gap:player_drop,...")
@@ -160,6 +161,11 @@ def main():
             from cv_multi import sc_games
             train = dfl + sc_games(args.sc_dir)
             print("training on {} DFL + {} SkillCorner matches".format(len(dfl), len(train) - len(dfl)))
+        if args.extra_dir:
+            from cv_multi import sc_games
+            extra = sc_games(args.extra_dir)
+            train = train + extra
+            print("plus {} extra matches for training only".format(len(extra)))
         model = fit(train)
         cost = (args.switch_cost, args.dead_cost)
         os.makedirs(os.path.dirname(os.path.abspath(args.save)), exist_ok=True)

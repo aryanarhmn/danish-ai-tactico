@@ -56,6 +56,11 @@ The video was watched only to understand what counts as possession and a dead ba
   player possession that ends in a stoppage to the start of the next one, and otherwise give it
   the team in possession, carried forward through loose balls. Positions SkillCorner extrapolated
   are dropped, so gaps stay gaps, and the data is resampled to 25 fps.
+- SkillCorner's first open release: nine European matches of 2019/20 broadcast tracking (Premier
+  League, Bundesliga, Serie A, Ligue 1, LaLiga), in the same repository's git history under the
+  same MIT licence (`tools/external/skillcorner_old.py`). They have no stoppage events, so we label
+  only the frames where a named player has the ball (about a fifth of each match) and use them for
+  training only.
 - Metrica Sports sample data: three anonymised matches with tracking and events
   (github.com/metrica-sports/sample-data). They have no possession truth, so we derive labels from
   the events. We use these matches only as a second, independent test set.
@@ -159,12 +164,20 @@ SkillCorner mean.
 |---|---|---|---|
 | 1 GRU, weight 0.5, costs 8/16 (previous) | 0.550 | 0.494 | 0.522 |
 | 3 GRUs, weight 0.5, costs 4/12 | 0.556 | 0.498 | 0.527 |
-| 3 GRUs, weight 0.8, costs 4/12 (submitted) | **0.572** | **0.499** | **0.535** |
+| 3 GRUs, weight 0.8, costs 4/12 | 0.572 | 0.499 | 0.535 |
+| same, plus the nine older SkillCorner matches in training (submitted) | **0.573** | **0.504** | **0.538** |
 
 The top of the table is flat: GRU weights 0.7 to 0.8 with switch costs 2 to 4 and dead-ball costs
 8 to 12 all score 0.535 within 0.001, so we took a setting in the middle of that plateau. It beats
 the previous setting on 20 of the 27 held-out matches. Three seeds matter once the GRU carries most
 of the weight: with one GRU, weight 0.8 scores 0.524.
+
+The nine older SkillCorner matches were added last, with the same folds, seeds, weight and costs.
+They raise the criterion by 0.003 and improve 18 of the 27 held-out matches, mostly the automatic
+tracking. Re-tuning the weight and costs with them gave at most 0.003 more and only on 17 matches,
+which we read as noise, so we kept the settings above. Two decoding ideas did not help either: a
+minimum duration per label (best +0.001, better on 9 of 27 matches) and writing `X` where the model
+is unsure, which only lowered the score (`tools/decode_cv.py`).
 
 We also tried a second stage that sees the first stage's probabilities over 30 seconds before
 and after each frame (`tools/stack_cv.py`). It scored the same on DFL (0.568) and 0.014 higher on
@@ -185,7 +198,7 @@ speed, as measured, but it does not simulate identity switches, false detections
 in the wrong place.
 
 We did not test the GRU on the Metrica games. With more time we would add more external matches of
-automatic tracking and try a larger GRU.
+automatic tracking with full possession and stoppage labels, and try a larger GRU.
 
 ## Reproduction
 
@@ -195,11 +208,13 @@ git clone --depth 1 https://github.com/metrica-sports/sample-data.git C:/mtah-ex
 git clone --depth 1 https://github.com/SkillCorner/opendata.git C:/mtah-ext/skillcorner
 python tools/external/dfl_open.py --out C:/mtah-ext/dfl            # downloads and converts the DFL matches
 python tools/external/skillcorner_open.py --src C:/mtah-ext/skillcorner/data/matches --out C:/mtah-ext/sc
+git clone --filter=blob:none --no-checkout https://github.com/SkillCorner/opendata.git C:/mtah-ext/sc-old-repo
+python tools/external/skillcorner_old.py --repo C:/mtah-ext/sc-old-repo --out C:/mtah-ext/sc-old
 python tools/cv_multi.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --sample-dir C:/mtah-ext/sample-data   # optional
-python tools/train_ml.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --save models/possession.pkl --switch-cost 8 --dead-cost 16
-python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --cv --seeds 3 --dump C:/mtah-ext/dump   # optional
+python tools/train_ml.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --extra-dir C:/mtah-ext/sc-old --save models/possession.pkl --switch-cost 8 --dead-cost 16
+python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --extra-dir C:/mtah-ext/sc-old --cv --seeds 3 --dump C:/mtah-ext/dump   # optional
 python tools/blend_cv.py C:/mtah-ext/dump                                                                       # optional
-python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --epochs 6 --seeds 3 --save models/sequence.pt
+python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --extra-dir C:/mtah-ext/sc-old --epochs 6 --seeds 3 --save models/sequence.pt
 python run.py --model models/possession.pkl --seq models/sequence.pt --seq-weight 0.8 --switch-cost 4 --dead-cost 12
 python evaluation/validate_submission.py evaluation/results/Danish_AI-Tactico.csv
 ```
