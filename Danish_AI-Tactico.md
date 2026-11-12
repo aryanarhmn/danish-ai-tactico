@@ -26,7 +26,8 @@ The model is trained only on external data, as the organisers' clarification of 
 requires. No parameter is fitted to the competition game, its ground truth or its video, and no
 hand-labelled data is used anywhere. Before that clarification we had tuned our rules on the public
 five minutes and on a few minutes we labelled by hand. When the rules were clarified we deleted the
-hand labels and the tools that made them, and redid everything on external data. The git history
+hand labels and the tools that made them, and redid everything on external data. The submitted
+system uses neither the hand labels nor the public five minutes. The git history
 shows both stages.
 
 We started with a hand-written rule system (nearest player with hysteresis, plus dead-ball rules for
@@ -64,6 +65,17 @@ The video was watched only to understand what counts as possession and a dead ba
 - Metrica Sports sample data: three anonymised matches with tracking and events
   (github.com/metrica-sports/sample-data). They have no possession truth, so we derive labels from
   the events. We use these matches only as a second, independent test set.
+
+**Training labels: who made them and how many.** Nobody on our team labelled anything by hand. No
+label in training, validation or tuning comes from the provided game, and the public five minutes
+were used only to check that the pipeline and file format are right.
+
+| Dataset | Who produced the labels | Labelled frames (25 fps) | Use |
+|---|---|---|---|
+| DFL / Sportec, 7 matches | the provider: official `BallPossession` and `BallStatus` on every frame | 1,002,644 | training, cross-validation |
+| SkillCorner 2024/25, 20 matches | SkillCorner: possession group and stoppage events; our code turns them into H, A, D | 2,948,890 | training, cross-validation |
+| SkillCorner 2019/20, 9 matches | SkillCorner: the player in possession; we keep only those frames | 278,267 | training only |
+| Metrica sample, 3 matches | our code, from Metrica's event data | – | test only |
 
 **Making clean data look like the competition data.** External tracking is corrected, while the
 competition tracking is automatic. Two scripts measure the provided tracking with automatic checks
@@ -109,7 +121,8 @@ The definitions come from the training truth (provider tracking), not from hand-
 What the model learned matches CHALLENGE.md on the points we checked: possession stays with the last
 team through loose balls and lost tracking, a touch without control does not change it, and every
 restart starts with a clear possessor. Dead ball runs from the moment play stops until the restart
-is taken. The second-half block before kick-off (frames 110808 to 113741) is always `D`.
+is taken. The second-half block before kick-off (frames 110808 to 113741) is always `D`; the
+organisers publish this in FAQ.md (graded from 110,808, kick-off at 113,742).
 
 The two decoding costs (switching team, entering or leaving a dead ball) were chosen by
 cross-validation on the external matches, together with the blend of the two models (see Results).
@@ -192,6 +205,10 @@ The external truth is not the competition truth. DFL marks about 23 possessions 
 SkillCorner about 15, while CHALLENGE.md gives 17 for the public window of the competition game, so
 providers differ in how quickly they hand possession over. Training on both puts the model between
 the two, and the decoding cost absorbs part of the rest, but not all.
+
+The SkillCorner labels come from SkillCorner's own algorithm, not from people, so the SkillCorner
+scores measure how closely we reproduce that algorithm on automatic tracking. The DFL labels are
+the provider's official ones.
 
 Our degradation is an incomplete model of the automatic tracking. It places ball gaps by the players'
 speed, as measured, but it does not simulate identity switches, false detections or a ball tracked

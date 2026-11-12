@@ -4,10 +4,19 @@ Our entry for More than a Hack 2027, Phase 1: label every frame of FC Barcelona 
 as Barça (`H`), Athletic (`A`), dead ball (`D`) or no call (`X`), from automatic tracking where the
 ball is missing on four frames in ten.
 
+![Forty seconds of a held-out Bundesliga match, with the true possession and our model's call](docs/replay.svg)
+
+<sub>A Bundesliga match from the DFL open data that the model never trained on, with the ball
+removed the way the competition tracker loses it. The clip is a typical one, not the best: the model
+agrees with the truth on 93 % of its frames and on 92 % of the whole match. It misses the short
+away spell in the middle. Regenerate it with `tools/make_readme_anim.py`. No competition data is
+shown anywhere in this repository.</sub>
+
 The repository is built on Metrica Sports'
-[challenge repository](https://github.com/metrica-sports/more-than-a-hack-2027). Their files are
-unchanged (`games.py`, `evaluation/`, `starter/` and the docs; their README is now
-`README_metrica.md`). Our write-up is [`Danish_AI-Tactico.md`](Danish_AI-Tactico.md).
+[challenge repository](https://github.com/metrica-sports/more-than-a-hack-2027). Their code is
+unchanged (`games.py`, `evaluation/`, `starter/`), and their docs are synced with the current
+official version (their README is now `README_metrica.md`). Our write-up is
+[`Danish_AI-Tactico.md`](Danish_AI-Tactico.md).
 
 ![Pipeline: tracking, features, two models, Viterbi decoder](docs/pipeline.png)
 
@@ -44,12 +53,18 @@ spellF1 on matches the models were not trained on, five-fold cross-validation:
 
 | Held out | Classifier, DFL only | Classifier, DFL + SkillCorner | Submitted (classifier + 3 GRUs) |
 |---|---|---|---|
-| DFL, 7 matches | 0.565 | 0.521 | **0.572** |
-| SkillCorner, 20 matches | 0.306 | 0.468 | **0.499** |
+| DFL, 7 matches | 0.565 | 0.521 | **0.573** |
+| SkillCorner, 20 matches | 0.306 | 0.468 | **0.504** |
 
 The first column shows why we added SkillCorner: a model trained only on clean data falls apart on
 real automatic tracking. The blend weight and the decoding costs (4 per change of team, 12 in or
-out of a dead ball) were picked on these folds with `tools/blend_cv.py`.
+out of a dead ball) were picked on these folds with `tools/blend_cv.py`, with a criterion fixed
+before we looked at the numbers.
+
+These scores are on other matches, under other providers' definitions of possession, so they
+cannot be compared with the competition board or its published baseline (spellF1 0.2433 on the
+full match). The SkillCorner labels also come from SkillCorner's own algorithm, so that row measures
+how closely we reproduce it on automatic tracking.
 
 ![Three minutes of a held-out Bundesliga match: truth, our model and the rule system](docs/timeline.png)
 
@@ -112,6 +127,15 @@ The earlier rule system (nearest player with hysteresis plus dead-ball rules) st
 
 The match data is not in this repository: `data/` and `cache/` are gitignored. External data is
 downloaded by the scripts above and is not committed either.
+
+## Data credits
+
+- Bassek, M., Rein, R., Weber, H. and Memmert, D. (2025). An integrated dataset of spatiotemporal
+  and event data in elite soccer. *Scientific Data*. Dataset: doi:10.6084/m9.figshare.28196177,
+  CC BY 4.0.
+- SkillCorner open data, github.com/SkillCorner/opendata, MIT licence. Data by SkillCorner.
+- Metrica Sports sample data, github.com/metrica-sports/sample-data.
+- Competition data and scorer: Metrica Sports and FC Barcelona, More than a Hack 2027.
 
 ## Team
 
