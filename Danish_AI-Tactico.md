@@ -35,6 +35,9 @@ ball out, whistles and restarts). It is still in the repository (`python run.py`
 and serves as our baseline. On held-out external matches the learned model beats it by a wide
 margin (table below), so the submission uses the model.
 
+We used Claude (Anthropic) as a coding and writing assistant. Every number in this document comes
+from the scripts in the repository.
+
 ## Data
 
 **Provided assets.** Only the automatic tactical tracking (ATD): ball and player positions, player
