@@ -37,6 +37,22 @@ STRIDE = 5
 # 1-2 m/s and 11 % above 2 m/s, so gaps are placed by player speed (fifth field = 1).
 TRAIN_MIX = "0.015:0.41:200:0.07:1,0.03:0.41:150:0.12:1"
 TEST_MIX = "0.02:0.41:250:0.09:1"
+SPELL_BALANCE = 0.0  # >0: give short spells more weight, since spellF1 counts every spell once
+BALANCE_FRAMES = 250 # 10 s: a spell of n < 250 frames gets sqrt(250 / n), capped, scaled by SPELL_BALANCE
+
+
+def spell_weights(y, cap=3.0):
+    """Per-frame loss weights: 1 everywhere, up to `cap` inside H/A spells shorter than BALANCE_FRAMES."""
+    w = np.ones(len(y), dtype=np.float64)
+    if SPELL_BALANCE <= 0:
+        return w
+    edges = np.flatnonzero(np.r_[True, y[1:] != y[:-1], True])
+    for a, b in zip(edges[:-1], edges[1:]):
+        if y[a] in (0, 1):
+            w[a:b] = 1.0 + SPELL_BALANCE * (np.clip(np.sqrt(BALANCE_FRAMES / (b - a)), 1.0, cap) - 1.0)
+    return w
+
+
 COSTS = [(s, d) for s in (4.0, 8.0, 12.0, 16.0, 24.0) for d in (4.0, 8.0, 12.0, 16.0)]
 
 
@@ -65,24 +81,33 @@ def prepare(data, sample_dir, dfl_dir, mix, seed_base=0):
     return out, names
 
 
-def training_rows(games):
-    Xs, ys = [], []
+def training_rows(games, with_weights=False):
+    Xs, ys, ws = [], [], []
     for g in games:
+        wg = spell_weights(g["y"]) if with_weights else None
         for j, Xg in enumerate(g.get("Xs", [g["X"]])):
             keep = np.flatnonzero(g["y"] >= 0)[j % STRIDE::STRIDE * len(g.get("Xs", [0]))]
             X, y = Xg[keep], g["y"][keep]
             Xs += [X, ml.swap_teams(X)]
             ys += [y, np.where(y == 2, 2, 1 - y)]
+            if with_weights:
+                ws += [wg[keep], wg[keep]]
+    if with_weights:
+        return np.concatenate(Xs), np.concatenate(ys), np.concatenate(ws)
     return np.concatenate(Xs), np.concatenate(ys)
 
 
 def fit(games, seed=0):
     from sklearn.ensemble import HistGradientBoostingClassifier
-    X, y = training_rows(games)
     model = HistGradientBoostingClassifier(max_iter=300, learning_rate=0.08, max_leaf_nodes=63,
                                            min_samples_leaf=80, l2_regularization=1.0,
                                            random_state=seed)
-    model.fit(X, y)
+    if SPELL_BALANCE > 0:
+        X, y, w = training_rows(games, with_weights=True)
+        model.fit(X, y, sample_weight=w)
+    else:
+        X, y = training_rows(games)
+        model.fit(X, y)
     return model
 
 
@@ -131,7 +156,11 @@ def main():
     parser.add_argument("--save")
     parser.add_argument("--switch-cost", type=float, default=None)
     parser.add_argument("--dead-cost", type=float, default=None)
+    parser.add_argument("--spell-balance", type=float, default=0.0,
+                        help="extra loss weight on short possessions (0 = off, as in v13; v14 uses 1)")
     args = parser.parse_args()
+    global SPELL_BALANCE
+    SPELL_BALANCE = args.spell_balance
 
     t0 = time.time()
     train_mix, test_mix = parse_mix(args.train_mix), parse_mix(args.test_mix)

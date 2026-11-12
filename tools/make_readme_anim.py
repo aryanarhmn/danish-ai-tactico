@@ -6,10 +6,17 @@ tracker loses it, some player tracks dropped), and the model's labels are the he
 saved by `tools/train_seq.py --cv --dump`. The clip was chosen to be typical, not the best: its
 frame agreement is printed and should sit near the match average.
 
-    python tools/make_readme_anim.py --dfl-dir C:\\mtah-ext\\dfl --dump C:\\mtah-ext\\dump --out docs/replay.svg
+    python tools/make_readme_anim.py --dfl-dir C:\\mtah-ext\\dfl --dump C:\\mtah-ext\\dump --out docs/replay.svg \\
+        --font Archivo[wdth,wght].ttf --display-font BigShouldersDisplay[wght].ttf
+
+Navy, blue, garnet and yellow, after the club's web colours. With --font and --display-font, subsets
+of Archivo and Big Shoulders Display (both SIL Open Font Licence, Google Fonts) are embedded so the
+SVG looks the same everywhere.
 """
 
 import argparse
+import base64
+import io
 import glob
 import os
 import pickle
@@ -29,8 +36,29 @@ MATCH, START, SECONDS, FPS = "DJ03WOH", 103799, 40, 5
 W, H = 1200, 940
 SC = 9.6                       # px per metre
 PX, PY = 75, 112               # pitch origin
-COL = {"H": "#1f5c45", "A": "#c99a2e", "D": "#c4cbc7"}
-INK, MUTED, LINE, BG, GRASS = "#16201b", "#6b7a73", "#ffffff", "#ffffff", "#e9efe9"
+BLAU, GRANA, NAVY = "#004D98", "#A50044", "#181733"
+COL = {"H": "#2E6FD0", "A": "#FDC52C", "D": "#4A4F75"}   # lighter blue so it reads on navy
+EDGE = {"H": "#ffffff", "A": NAVY}
+INK, MUTED, LINE, BG, GRASS = "#FFFFFF", "#B9BED3", "#3A3966", NAVY, "#201F45"
+GLYPHS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,?:%/()-\u00b7"
+
+
+def font_face(path, family="Archivo", axes=None, glyphs=GLYPHS):
+    """A variable font, cut to the weights, widths and glyphs the SVG uses, as an inline woff."""
+    from fontTools import subset
+    from fontTools.ttLib import TTFont
+    from fontTools.varLib import instancer
+    f = instancer.instantiateVariableFont(TTFont(path), axes or {"wght": (400, 800), "wdth": (75, 100)})
+    opt = subset.Options()
+    opt.flavor, opt.layout_features, opt.name_IDs = "woff", ["kern", "liga"], ["*"]
+    sub = subset.Subsetter(opt)
+    sub.populate(text=glyphs)
+    sub.subset(f)
+    f.flavor = "woff"
+    buf = io.BytesIO()
+    f.save(buf)
+    return ('@font-face{font-family:"' + family + '";font-weight:400 900;font-stretch:75% 100%;'
+            'src:url(data:font/woff;base64,' + base64.b64encode(buf.getvalue()).decode() + ') format("woff")}')
 
 
 def fmt(v):
@@ -42,6 +70,8 @@ def main():
     ap.add_argument("--dfl-dir", required=True)
     ap.add_argument("--dump", required=True)
     ap.add_argument("--out", default=os.path.join(ROOT, "docs", "replay.svg"))
+    ap.add_argument("--font", help="Archivo variable font (.ttf) to embed; optional")
+    ap.add_argument("--display-font", help="Big Shoulders Display variable font (.ttf) for the title; optional")
     args = ap.parse_args()
 
     games = raw_games("dfl", None, args.dfl_dir)
@@ -72,11 +102,20 @@ def main():
            'aria-label="Forty seconds of a held-out Bundesliga match: player and ball tracking with the true '
            'possession and our model\'s call underneath.">'.format(w=W, h=H),
            '<title>Danish AI-Tactico: our model on a held-out match</title>',
-           '<style>text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}'
-           '.m{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}</style>',
+           '<style>' + (font_face(args.font) if args.font else '') +
+           (font_face(args.display_font, "Big Shoulders Display", {"wght": (900, 900)}, "WHO HAS THE BALL?")
+            if args.display_font else '') +
+           'text{font-family:Archivo,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}'
+           '.m{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}'
+           '.d{font-family:"Big Shoulders Display",Impact,sans-serif}</style>',
            '<rect width="{}" height="{}" rx="18" fill="{}"/>'.format(W, H, BG),
-           '<text x="{}" y="50" font-size="24" font-weight="700" fill="{}">Who has the ball?</text>'.format(PX, INK),
-           '<text x="{}" y="80" font-size="15" fill="{}">A Bundesliga match the model never trained on. '
+           '<clipPath id="card"><rect width="{}" height="{}" rx="18"/></clipPath>'.format(W, H),
+           '<g clip-path="url(#card)">' + "".join(
+               '<rect x="{}" y="0" width="40" height="8" fill="{}"/>'.format(x, BLAU if (x // 40) % 2 == 0 else GRANA)
+               for x in range(0, W, 40)) + '</g>',
+           '<text x="{}" y="64" font-size="52" font-weight="900" class="d" '
+           'fill="{}">WHO HAS THE BALL?</text>'.format(PX, INK),
+           '<text x="{}" y="92" font-size="15" fill="{}">A Bundesliga match the model never trained on. '
            'The ball is removed where the competition tracker loses it.</text>'.format(PX, MUTED)]
 
     # pitch
@@ -105,12 +144,12 @@ def main():
         for arr in (xs, ys):                 # hold the last known place while hidden
             good = np.flatnonzero(~np.isnan(arr))
             arr[:] = np.interp(np.arange(n), good, arr[good])
-        colour = COL["H"] if d["team"][k] == 0 else COL["A"]
-        out.append('<circle r="9" fill="{}" stroke="#ffffff" stroke-width="2">'
+        side = "H" if d["team"][k] == 0 else "A"
+        out.append('<circle r="9" fill="{}" stroke="{}" stroke-width="2">'
                    '<animate attributeName="cx" dur="{d}" repeatCount="indefinite" values="{}"/>'
                    '<animate attributeName="cy" dur="{d}" repeatCount="indefinite" values="{}"/>'
                    '<animate attributeName="opacity" dur="{d}" repeatCount="indefinite" calcMode="discrete" values="{}"/>'
-                   '</circle>'.format(colour, fmt(xs), fmt(ys), ";".join("1" if s else "0" for s in seen), d=dur))
+                   '</circle>'.format(COL[side], EDGE[side], fmt(xs), fmt(ys), ";".join("1" if s else "0" for s in seen), d=dur))
 
     # ball (only where the degraded tracking has it)
     b = dd["ball"][idx]
@@ -135,7 +174,7 @@ def main():
         out.append('<text x="{}" y="{}" font-size="14" fill="{}">{}</text>'.format(PX, y + 15, INK, name))
         runs = np.flatnonzero(np.r_[True, lab[1:] != lab[:-1]])
         for a, e in zip(runs, np.r_[runs[1:], len(lab)]):
-            c = {"B": "#8c9a93", "-": "#eef1ef"}.get(lab[a], COL.get(lab[a], "#ffffff"))
+            c = {"B": "#8C93B0", "-": "#25244D"}.get(lab[a], COL.get(lab[a], "#ffffff"))
             out.append('<rect x="{:.1f}" y="{}" width="{:.1f}" height="{}" fill="{}"/>'.format(
                 tx + a / len(lab) * tw, y + (8 if r == 2 else 0), (e - a) / len(lab) * tw, 6 if r == 2 else 20, c))
     out.append('<line x1="{x}" x2="{x}" y1="{}" y2="{}" stroke="{}" stroke-width="2">'

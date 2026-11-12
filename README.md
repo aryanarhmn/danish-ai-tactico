@@ -8,8 +8,8 @@ ball is missing on four frames in ten.
 
 <sub>A Bundesliga match from the DFL open data that the model never trained on, with the ball
 removed the way the competition tracker loses it. The clip is a typical one, not the best: the model
-agrees with the truth on 93 % of its frames and on 92 % of the whole match. It misses the short
-away spell in the middle. Regenerate it with `tools/make_readme_anim.py`. No competition data is
+agrees with the truth on 93 % of its frames and on 92 % of the whole match. It catches the short
+away spell in the middle, a little late. Regenerate it with `tools/make_readme_anim.py`. No competition data is
 shown anywhere in this repository.</sub>
 
 The repository is built on Metrica Sports'
@@ -31,7 +31,9 @@ Two models turn those numbers into probabilities. A gradient-boosted classifier 
 seconds around the frame. Three bidirectional GRUs, trained from different seeds, read the whole
 half and can carry what happened before a long gap in the ball tracking. We average them with a
 weight of 0.8 on the GRUs. A Viterbi decoder then charges a cost for every change of label, which
-turns the per-frame guesses into whole possessions.
+turns the per-frame guesses into whole possessions. During training, frames inside short
+possessions count up to three times as much, because spellF1 gives a two-second possession the same
+weight as a forty-second one.
 
 Nothing is fitted to the competition match, its ground truth or its video. All training and tuning
 uses external data:
@@ -53,11 +55,12 @@ spellF1 on matches the models were not trained on, five-fold cross-validation:
 
 | Held out | Classifier, DFL only | Classifier, DFL + SkillCorner | Submitted (classifier + 3 GRUs) |
 |---|---|---|---|
-| DFL, 7 matches | 0.565 | 0.521 | **0.573** |
-| SkillCorner, 20 matches | 0.306 | 0.468 | **0.504** |
+| DFL, 7 matches | 0.565 | 0.521 | **0.633** |
+| SkillCorner, 20 matches | 0.306 | 0.468 | **0.516** |
 
 The first column shows why we added SkillCorner: a model trained only on clean data falls apart on
-real automatic tracking. The blend weight and the decoding costs (4 per change of team, 12 in or
+real automatic tracking. Weighting short possessions raised the submitted system from 0.573 to
+0.633 on DFL and from 0.504 to 0.516 on SkillCorner, and improved 25 of the 27 matches. The blend weight and the decoding costs (4 per change of team, 12 in or
 out of a dead ball) were picked on these folds with `tools/blend_cv.py`, with a criterion fixed
 before we looked at the numbers.
 
@@ -92,15 +95,15 @@ python tools/external/skillcorner_open.py --src C:/mtah-ext/skillcorner/data/mat
 git clone --filter=blob:none --no-checkout https://github.com/SkillCorner/opendata.git C:/mtah-ext/sc-old-repo
 python tools/external/skillcorner_old.py --repo C:/mtah-ext/sc-old-repo --out C:/mtah-ext/sc-old
 
-python tools/train_ml.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --extra-dir C:/mtah-ext/sc-old --save models/possession.pkl --switch-cost 8 --dead-cost 16
-python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --extra-dir C:/mtah-ext/sc-old --epochs 6 --seeds 3 --save models/sequence.pt
+python tools/train_ml.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --extra-dir C:/mtah-ext/sc-old --save models/possession.pkl --switch-cost 8 --dead-cost 16 --spell-balance 1.0
+python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --extra-dir C:/mtah-ext/sc-old --epochs 6 --seeds 3 --save models/sequence.pt --spell-balance 1.0
 ```
 
 The cross-validation behind the numbers above:
 
 ```bash
 python tools/cv_multi.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --sample-dir C:/mtah-ext/sample-data
-python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --extra-dir C:/mtah-ext/sc-old --cv --seeds 3 --dump C:/mtah-ext/dump
+python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --extra-dir C:/mtah-ext/sc-old --cv --seeds 3 --spell-balance 1.0 --dump C:/mtah-ext/dump
 python tools/blend_cv.py C:/mtah-ext/dump
 ```
 
@@ -136,6 +139,8 @@ downloaded by the scripts above and is not committed either.
 - SkillCorner open data, github.com/SkillCorner/opendata, MIT licence. Data by SkillCorner.
 - Metrica Sports sample data, github.com/metrica-sports/sample-data.
 - Competition data and scorer: Metrica Sports and FC Barcelona, More than a Hack 2027.
+- Typefaces Archivo (Omnibus-Type) and Big Shoulders Display (Patric King), SIL Open Font Licence,
+  embedded in `docs/replay.svg`.
 
 ## Team
 

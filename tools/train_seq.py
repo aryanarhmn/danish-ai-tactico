@@ -52,17 +52,23 @@ def chunks(games, stats, rng):
     n_in = 2 * games[0]["Xs"][0].shape[1]
     X = np.empty((total, seq.CHUNK, n_in), dtype=np.float32)
     Y = np.empty((total, seq.CHUNK), dtype=np.int64)
+    Wt = np.empty((total, seq.CHUNK), dtype=np.float32) if T.SPELL_BALANCE > 0 else None
     i = 0
     for g, j, start, last, n_chunks in plan:
         if not n_chunks:
             continue
         z, _ = seq.prepare_inputs(g["Xs"][j][start:last + 1:seq.STEP], stats)
         y = g["y"][start:last + 1:seq.STEP]
+        wy = T.spell_weights(g["y"])[start:last + 1:seq.STEP] if Wt is not None else None
         for c in range(n_chunks):
             zz, yy = z[c * seq.CHUNK:(c + 1) * seq.CHUNK], y[c * seq.CHUNK:(c + 1) * seq.CHUNK]
             X[i], X[i + 1] = zz, seq.swap_inputs(zz, k)
             Y[i], Y[i + 1] = yy, np.where(yy == 2, 2, np.where(yy >= 0, 1 - yy, -1))
+            if Wt is not None:
+                Wt[i] = Wt[i + 1] = wy[c * seq.CHUNK:(c + 1) * seq.CHUNK]
             i += 2
+    if Wt is not None:
+        return X, Y, Wt
     return X, Y
 
 
@@ -72,7 +78,9 @@ def fit_seq(games, seed=0, log=None):
     rng = np.random.default_rng(seed)
     allX = np.concatenate([g["Xs"][0][g["y"] >= 0][::25] for g in games])
     _, stats = seq.prepare_inputs(allX)
-    X, Y = chunks(games, stats, rng)
+    out = chunks(games, stats, rng)
+    X, Y = out[0], out[1]
+    W = torch.from_numpy(out[2]) if len(out) > 2 else None
     net = seq.build_net(X.shape[2])
     opt = torch.optim.AdamW(net.parameters(), lr=2e-3, weight_decay=1e-4)
     lossf = torch.nn.CrossEntropyLoss(ignore_index=-1)
@@ -85,7 +93,14 @@ def fit_seq(games, seed=0, log=None):
         for b in range(0, n, 32):
             idx = perm[b:b + 32]
             opt.zero_grad()
-            loss = lossf(net(Xt[idx]).reshape(-1, 3), Yt[idx].reshape(-1))
+            if W is None:
+                loss = lossf(net(Xt[idx]).reshape(-1, 3), Yt[idx].reshape(-1))
+            else:                       # weighted mean over labelled steps
+                yy = Yt[idx].reshape(-1)
+                ww = W[idx].reshape(-1) * (yy >= 0)
+                raw = torch.nn.functional.cross_entropy(net(Xt[idx]).reshape(-1, 3), yy.clamp(min=0),
+                                                        reduction="none")
+                loss = (raw * ww).sum() / ww.sum().clamp(min=1e-6)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
             opt.step()
@@ -107,10 +122,13 @@ def main():
     parser.add_argument("--only-folds", type=int, default=None, help="run only the first N folds")
     parser.add_argument("--epochs", type=int, default=12)
     parser.add_argument("--save")
+    parser.add_argument("--spell-balance", type=float, default=0.0,
+                        help="extra loss weight on short possessions (0 = off, as in v13; v14 uses 1)")
     parser.add_argument("--seeds", type=int, default=1, help="GRUs per fold / in the saved ensemble")
     parser.add_argument("--dump", help="with --cv: save each fold's held-out probabilities here "
                         "(one pickle per fold; folds already saved are skipped)")
     args = parser.parse_args()
+    T.SPELL_BALANCE = args.spell_balance
     import torch
     globals()["EPOCHS"] = args.epochs
     t0 = time.time()

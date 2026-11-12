@@ -20,7 +20,8 @@ few seconds of context. A bidirectional recurrent network (GRU) reads the same f
 whole half, so it can carry what happened 30 seconds ago through a long stretch without a tracked
 ball. We average the two models' probabilities, and Viterbi decoding then charges a cost for every
 change of label. The decoder turns flickering per-frame guesses into whole possessions, which is
-what spellF1 rewards.
+what spellF1 rewards. In training, frames inside short possessions count up to three times as much,
+because spellF1 gives a two-second possession the same weight as a forty-second one.
 
 The model is trained only on external data, as the organisers' clarification of 3 November
 requires. No parameter is fitted to the competition game, its ground truth or its video, and no
@@ -181,7 +182,8 @@ SkillCorner mean.
 | 1 GRU, weight 0.5, costs 8/16 (previous) | 0.550 | 0.494 | 0.522 |
 | 3 GRUs, weight 0.5, costs 4/12 | 0.556 | 0.498 | 0.527 |
 | 3 GRUs, weight 0.8, costs 4/12 | 0.572 | 0.499 | 0.535 |
-| same, plus the nine older SkillCorner matches in training (submitted) | **0.573** | **0.504** | **0.538** |
+| same, plus the nine older SkillCorner matches in training | 0.573 | 0.504 | 0.538 |
+| same, with short possessions weighted in training (submitted) | **0.633** | **0.516** | **0.575** |
 
 The top of the table is flat: GRU weights 0.7 to 0.8 with switch costs 2 to 4 and dead-ball costs
 8 to 12 all score 0.535 within 0.001, so we took a setting in the middle of that plateau. It beats
@@ -195,12 +197,29 @@ which we read as noise, so we kept the settings above. Two decoding ideas did no
 minimum duration per label (best +0.001, better on 9 of 27 matches) and writing `X` where the model
 is unsure, which only lowered the score (`tools/decode_cv.py`).
 
+**Weighting short possessions.** spellF1 counts every possession once, however long it is, but in a
+per-frame loss a 40-second possession weighs twenty times as much as a 2-second one. The models
+therefore found too few possessions: 276 per held-out DFL match against 437 in the truth, and 183
+per SkillCorner match against 294. We now weight the loss inside short possessions. A frame in an
+`H` or `A` possession of n frames gets weight min(√(250/n), 3) when the possession is shorter than
+10 seconds, so a 2.5-second possession counts twice per frame and one under about 1.1 seconds three
+times (`--spell-balance 1.0` in `tools/train_ml.py` and `tools/train_seq.py`). With the same folds,
+seeds, weight and costs, the models find 336 and 214 possessions per match, and spellF1 rises on all
+7 DFL matches and on 18 of the 20 SkillCorner matches (the worst falls by 0.022). The classifier
+alone gains 0.018 on DFL and 0.002 on SkillCorner, so most of the gain comes through the GRU. We
+ran the grid of weights and costs again on the new folds: 0.8 and 4/12 is still at the top, so the
+settings did not change.
+
 We also tried a second stage that sees the first stage's probabilities over 30 seconds before
 and after each frame (`tools/stack_cv.py`). It scored the same on DFL (0.568) and 0.014 higher on
 the Metrica games, too little to justify a second model, so we left it out. Earlier we tried, and
 dropped, a rule that the ball must move with the player and rules for goals and for a ball lost at
-the line. None of them helped on external data. We report no score on the competition game, because
-its public five minutes were not used to choose or tune anything.
+the line. None of them helped on external data.
+
+**Public five-minute check.** After the final model was fixed, we scored it once on the public five
+minutes with the official script, as a check that the file and labels are right: spellF1 0.549,
+macroF1 0.774, 18 predicted possessions against 17. The window has only 17 possessions, so one more
+or one fewer moves spellF1 by about six points. Nothing was chosen or tuned on it.
 
 ## Limitations
 
@@ -231,10 +250,10 @@ python tools/external/skillcorner_open.py --src C:/mtah-ext/skillcorner/data/mat
 git clone --filter=blob:none --no-checkout https://github.com/SkillCorner/opendata.git C:/mtah-ext/sc-old-repo
 python tools/external/skillcorner_old.py --repo C:/mtah-ext/sc-old-repo --out C:/mtah-ext/sc-old
 python tools/cv_multi.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --sample-dir C:/mtah-ext/sample-data   # optional
-python tools/train_ml.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --extra-dir C:/mtah-ext/sc-old --save models/possession.pkl --switch-cost 8 --dead-cost 16
-python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --extra-dir C:/mtah-ext/sc-old --cv --seeds 3 --dump C:/mtah-ext/dump   # optional
+python tools/train_ml.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --extra-dir C:/mtah-ext/sc-old --save models/possession.pkl --switch-cost 8 --dead-cost 16 --spell-balance 1.0
+python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --extra-dir C:/mtah-ext/sc-old --cv --seeds 3 --spell-balance 1.0 --dump C:/mtah-ext/dump   # optional
 python tools/blend_cv.py C:/mtah-ext/dump                                                                       # optional
-python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --extra-dir C:/mtah-ext/sc-old --epochs 6 --seeds 3 --save models/sequence.pt
+python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --extra-dir C:/mtah-ext/sc-old --epochs 6 --seeds 3 --save models/sequence.pt --spell-balance 1.0
 python run.py --model models/possession.pkl --seq models/sequence.pt --seq-weight 0.8 --switch-cost 4 --dead-cost 12
 python evaluation/validate_submission.py evaluation/results/Danish_AI-Tactico.csv
 ```
