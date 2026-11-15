@@ -25,7 +25,7 @@ official version (their README is now `README_metrica.md`). Our write-up is
 Every frame becomes 85 numbers: distances from the ball to each team, how far each team is pushed
 up and how spread out it is, how fast the players move, how long the ball has been missing, and
 when each team last touched the ball and next will. A touch is a sharp turn or change of speed of
-the ball with one team's player closest and within 1.5 m.
+the ball with one team's player closest and within 1.5&nbsp;m.
 Both teams get the same block of features, and the models see both orders, so they cannot learn
 anything about which side is the home team.
 
@@ -48,18 +48,19 @@ uses external data:
 | [Metrica sample data](https://github.com/metrica-sports/sample-data), 3 matches | public | test set only |
 
 The DFL tracking is clean, so we remove the ball where the competition tracker loses it. We measured
-that with two scripts that print summary numbers only: the ball is missing on 41 % of frames, and
-mostly when the players walk (80 % below 1 m/s, 11 % above 2 m/s).
+that with two scripts that print summary numbers only: the ball is missing on 41&nbsp;% of frames, and
+mostly when the players walk (80&nbsp;% below 1&nbsp;m/s, 11&nbsp;% above 2&nbsp;m/s).
 
 ## Results on external matches
 
-spellF1 on matches the models were not trained on, five-fold cross-validation:
+spellF1 on matches the models were not trained on: five-fold cross-validation over DFL and
+SkillCorner, and the three Metrica games as a final test.
 
 | Held out | Classifier only | Without touch features | Submitted (classifier + 3 GRUs) |
 |---|---|---|---|
 | DFL, 7 matches | 0.624 | 0.633 | **0.673** |
 | SkillCorner, 20 matches | 0.459 | **0.516** | 0.513 |
-| Metrica, 3 matches (test only) | | 0.654 | **0.713** |
+| Metrica, 3 matches (test only) | – | 0.654 | **0.713** |
 
 The touch features helped on all seven DFL matches and all three Metrica games, and did nothing on
 SkillCorner, whose broadcast ball jumps too much for a turn of the ball to mean anything. The
@@ -74,6 +75,9 @@ full match). The SkillCorner labels also come from SkillCorner's own algorithm, 
 how closely we reproduce it on automatic tracking.
 
 ![Three minutes of a held-out Bundesliga match: truth, our model and the version without touch features](docs/timeline.png)
+
+<sub>A window chosen because its agreement matches the match average, not because the new model
+wins it: here the version without touch features is one point better.</sub>
 
 ## Reproduce the submitted file
 
@@ -128,6 +132,7 @@ committed ones produced the submission.
 | `tools/external/` | download and convert DFL, SkillCorner and Metrica data |
 | `tools/noise_match.py`, `tools/gap_profile.py` | measure the competition tracking (summary numbers only) |
 | `models/` | the trained models used for the submission |
+| `tools/error_report.py`, `tools/goal_debug.py`, `tools/inspect_frames.py` | from the rule-system stage; not used by the submitted model |
 
 The earlier rule system (nearest player with hysteresis plus dead-ball rules) still runs with
 `python run.py` without `--model`. We kept it as a baseline.
