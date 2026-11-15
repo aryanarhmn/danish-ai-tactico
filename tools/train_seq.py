@@ -72,6 +72,24 @@ def chunks(games, stats, rng):
     return X, Y
 
 
+DEVICE = "cpu"       # "cuda" trains on the graphics card; prediction always runs on the CPU
+BOUNDARY_W = 0.0     # >0: train a fourth output, "the label changes within BOUNDARY_K steps"
+BOUNDARY_K = 2       # steps at 5 fps, i.e. +-0.4 s
+
+
+def boundary_targets(Y):
+    """(chunks, steps) float: 1 within BOUNDARY_K steps of a label change, 0 elsewhere, -1 where
+    the label is unknown."""
+    import torch
+    change = torch.zeros(Y.shape, dtype=torch.float32)
+    known = (Y[:, 1:] >= 0) & (Y[:, :-1] >= 0)
+    change[:, 1:] = ((Y[:, 1:] != Y[:, :-1]) & known).float()
+    if BOUNDARY_K:
+        k = 2 * BOUNDARY_K + 1
+        change = torch.nn.functional.max_pool1d(change[:, None], k, stride=1, padding=BOUNDARY_K)[:, 0]
+    return torch.where(Y >= 0, change, torch.full_like(change, -1.0))
+
+
 def fit_seq(games, seed=0, log=None):
     import torch
     torch.manual_seed(seed)
@@ -81,11 +99,17 @@ def fit_seq(games, seed=0, log=None):
     out = chunks(games, stats, rng)
     X, Y = out[0], out[1]
     W = torch.from_numpy(out[2]) if len(out) > 2 else None
-    net = seq.build_net(X.shape[2])
+    net = seq.build_net(X.shape[2], 4 if BOUNDARY_W > 0 else 3).to(DEVICE)
     opt = torch.optim.AdamW(net.parameters(), lr=2e-3, weight_decay=1e-4)
     lossf = torch.nn.CrossEntropyLoss(ignore_index=-1)
     Xt, Yt = torch.from_numpy(X), torch.from_numpy(Y)
     n = len(Xt)
+    if BOUNDARY_W > 0:
+        Bt = boundary_targets(Yt)
+        frac = float((Bt == 1).sum()) / float((Bt >= 0).sum())
+        pos_w = torch.tensor((1 - frac) / max(frac, 1e-6), device=DEVICE)
+        if log:
+            log("    boundary frames {:.1%}, positive weight {:.1f}".format(frac, float(pos_w)))
     for ep in range(EPOCHS):
         net.train()
         perm = torch.randperm(n)
@@ -93,20 +117,30 @@ def fit_seq(games, seed=0, log=None):
         for b in range(0, n, 32):
             idx = perm[b:b + 32]
             opt.zero_grad()
+            xb, yb = Xt[idx].to(DEVICE), Yt[idx].to(DEVICE)
+            logits = net(xb)
+            cls = logits[..., :3]
             if W is None:
-                loss = lossf(net(Xt[idx]).reshape(-1, 3), Yt[idx].reshape(-1))
+                loss = lossf(cls.reshape(-1, 3), yb.reshape(-1))
             else:                       # weighted mean over labelled steps
-                yy = Yt[idx].reshape(-1)
-                ww = W[idx].reshape(-1) * (yy >= 0)
-                raw = torch.nn.functional.cross_entropy(net(Xt[idx]).reshape(-1, 3), yy.clamp(min=0),
+                yy = yb.reshape(-1)
+                ww = W[idx].to(DEVICE).reshape(-1) * (yy >= 0)
+                raw = torch.nn.functional.cross_entropy(cls.reshape(-1, 3), yy.clamp(min=0),
                                                         reduction="none")
                 loss = (raw * ww).sum() / ww.sum().clamp(min=1e-6)
+            if BOUNDARY_W > 0:
+                bt = Bt[idx].to(DEVICE).reshape(-1)
+                ok = bt >= 0
+                bl = torch.nn.functional.binary_cross_entropy_with_logits(
+                    logits[..., 3].reshape(-1)[ok], bt[ok], pos_weight=pos_w)
+                loss = loss + BOUNDARY_W * bl
             loss.backward()
             torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
             opt.step()
             tot += float(loss.detach()) * len(idx)
         if log:
             log("    epoch {} loss {:.3f}".format(ep + 1, tot / n))
+    net = net.cpu()
     net.eval()
     return {"net": net, "stats": stats}
 
@@ -124,11 +158,21 @@ def main():
     parser.add_argument("--save")
     parser.add_argument("--spell-balance", type=float, default=0.0,
                         help="extra loss weight on short possessions (0 = off, as in v13; v14 uses 1)")
+    parser.add_argument("--device", default="cpu", help="cpu or cuda (training only)")
+    parser.add_argument("--boundary-weight", type=float, default=0.0,
+                        help="train a change-point output with this loss weight (0 = off, as in v14)")
     parser.add_argument("--seeds", type=int, default=1, help="GRUs per fold / in the saved ensemble")
     parser.add_argument("--dump", help="with --cv: save each fold's held-out probabilities here "
                         "(one pickle per fold; folds already saved are skipped)")
     args = parser.parse_args()
     T.SPELL_BALANCE = args.spell_balance
+    globals()["BOUNDARY_W"] = args.boundary_weight
+    globals()["DEVICE"] = args.device
+    if args.device == "cuda":
+        import torch as _t
+        if not _t.cuda.is_available():
+            raise SystemExit("--device cuda, but PyTorch sees no graphics card (CPU-only build?)")
+        print("training on", _t.cuda.get_device_name(0), flush=True)
     import torch
     globals()["EPOCHS"] = args.epochs
     t0 = time.time()
@@ -159,9 +203,13 @@ def main():
                 p2s = [seq.predict_proba(m, g["X"], g["halves"]) for m in m2s]
                 p2 = np.mean(p2s, axis=0)
                 if args.dump:
-                    dump.append({"tag": tag, "name": g["name"], "p_hgb": p1.astype(np.float32),
-                                 "p_gru": np.stack(p2s).astype(np.float32), "labels": g["labels"],
-                                 "halves": g["halves"]})
+                    entry = {"tag": tag, "name": g["name"], "p_hgb": p1.astype(np.float32),
+                             "p_gru": np.stack(p2s).astype(np.float32), "labels": g["labels"],
+                             "halves": g["halves"]}
+                    if BOUNDARY_W > 0:
+                        entry["p_bnd"] = np.stack([seq.predict_boundary(m, g["X"], g["halves"])
+                                                   for m in m2s]).astype(np.float16)
+                    dump.append(entry)
                 for name, p in (("hgb", p1), ("gru", p2), ("avg", (p1 + p2) / 2)):
                     for c in COSTS:
                         res[name + "|" + tag][c].append(T.score(g["labels"], ml.label(p, g["halves"], *c)))
@@ -174,7 +222,7 @@ def main():
     if args.save:
         nets = [fit_seq(dfl_train + sc + extra, seed=k, log=log) for k in range(args.seeds)]
         torch.save({"states": [b["net"].state_dict() for b in nets], "stats": nets[0]["stats"],
-                    "n_in": 2 * len(ml.FEATURE_NAMES)}, args.save)
+                    "n_in": 2 * len(ml.FEATURE_NAMES), "n_out": 4 if BOUNDARY_W > 0 else 3}, args.save)
         print("saved", args.save)
 
 

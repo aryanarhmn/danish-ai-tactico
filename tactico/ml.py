@@ -72,6 +72,12 @@ def _shift_mean(x, window, ahead):
     return out.astype(np.float32)
 
 
+def _nanmin(a):
+    """Row minimum ignoring NaN; NaN where the whole row is NaN."""
+    b = np.where(np.isnan(a), np.inf, a).min(axis=1)
+    return np.where(np.isinf(b), np.nan, b).astype(np.float32)
+
+
 def attack_sign(players, team, halves):
     """Per frame and team: +1 if the team attacks towards x = length, -1 otherwise.
     A team's mean x over a half is on its own side, so the team with the lower mean attacks right."""
@@ -86,16 +92,62 @@ def attack_sign(players, team, halves):
     return sign
 
 
+# ----------------------------------------------------------------------------- touches
+
+PZ_RADIUS = 1.5       # m: a player this close to the ball can be playing it
+TURN_DEG = 15.0       # the ball changes direction by at least this much ...
+DSPEED = 2.0          # ... or its speed by this much (m/s) within about a quarter of a second
+LAG = 3               # frames on each side of the frame for "before" and "after"
+AGE_CAP = 30.0        # seconds
+
+
+def _bfill(a):
+    return _ffill(a[::-1])[::-1]
+
+
+def ball_kinematics(ball):
+    """Velocity before and after each frame (m/s), turn angle (degrees), speed change and
+    acceleration (m/s2). NaN wherever a needed ball position is missing, so nothing is computed
+    across a gap in the ball tracking."""
+    n = len(ball)
+    vb = np.full((n, 2), np.nan, np.float32)      # over the LAG frames before
+    va = np.full((n, 2), np.nan, np.float32)      # over the LAG frames after
+    vb[LAG:] = (ball[LAG:] - ball[:-LAG]) * (FPS / LAG)
+    va[:-LAG] = (ball[LAG:] - ball[:-LAG]) * (FPS / LAG)
+    sb, sa = np.linalg.norm(vb, axis=1), np.linalg.norm(va, axis=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        cos = np.sum(vb * va, axis=1) / (sb * sa)
+        turn = np.degrees(np.arccos(np.clip(cos, -1, 1)))
+    turn = np.where((sb < 1.0) | (sa < 1.0), 0.0, turn)       # direction means nothing at a crawl
+    turn = np.where(np.isnan(sb) | np.isnan(sa), np.nan, turn)
+    dspeed = np.abs(sa - sb)
+    acc = np.linalg.norm(va - vb, axis=1) * (FPS / LAG)
+    return va, turn.astype(np.float32), dspeed.astype(np.float32), np.minimum(acc, 80).astype(np.float32)
+
+
+def _age(event, ahead):
+    """Seconds since the last (or until the next) True in `event`, capped."""
+    n = len(event)
+    if ahead:
+        return _age(event[::-1], False)[::-1]
+    idx = np.where(event, np.arange(n), -1)
+    np.maximum.accumulate(idx, out=idx)
+    age = np.where(idx >= 0, (np.arange(n) - idx) / FPS, AGE_CAP)
+    return np.minimum(age, AGE_CAP).astype(np.float32)
+
+
 # ----------------------------------------------------------------------------- features
 
 TEAM_FEATURES = ("d1", "d2", "n2", "n5", "n10", "d1_last", "speed", "adv", "adv_v1", "adv_v3",
                  "adv_v10", "adv_m10", "adv_p10", "spread_y10",
                  "spread_x", "spread_y", "slow", "ball_att", "d1_m1", "d1_p1",
-                 "d1_m3", "d1_p3", "n5_m1", "n5_p1")
+                 "d1_m3", "d1_p3", "n5_m1", "n5_p1",
+                 "tch_age", "tch_until", "tch_last", "tch_next", "tch_rate", "reach1", "d1_next")
 SHARED_FEATURES = ("ball_seen", "ball_age", "ball_speed", "ball_speed_m1", "ball_speed_p1",
                    "edge_touch", "edge_goal", "out", "speed_all", "speed_all_m2", "speed_all_p2",
                    "speed_all_m5", "speed_all_p5", "speed_all_m15", "speed_all_p15",
-                   "seen_m1", "seen_p1", "seen_p3", "gap_d1")
+                   "seen_m1", "seen_p1", "seen_p3",
+                   "ball_acc", "ball_turn", "ball_until", "duel", "gap_d1")
 
 
 def features(d, pitch=(105.0, 68.0)):
@@ -134,6 +186,21 @@ def features(d, pitch=(105.0, 68.0)):
     dist_seen = np.linalg.norm(diff_seen, axis=2)
     dist_last = np.linalg.norm(players - last[:, None, :], axis=2)
 
+    # touches: the ball is within reach of a player and changes direction or speed there
+    va, turn, dspeed, acc = ball_kinematics(ball)
+    with np.errstate(invalid="ignore"):
+        kink = (turn >= TURN_DEG) | (dspeed >= DSPEED)
+    near = {t: np.min(np.where(np.isnan(dist_seen[:, team == t]), np.inf, dist_seen[:, team == t]), axis=1)
+            for t in (HOME, AWAY)}
+    touch = {t: kink & (near[t] <= PZ_RADIUS) & (near[t] < near[1 - t]) for t in (HOME, AWAY)}
+    age_b = {t: _age(touch[t], False) for t in (HOME, AWAY)}
+    age_f = {t: _age(touch[t], True) for t in (HOME, AWAY)}
+    nxt = _bfill(ball)                                   # where the ball is when it is next seen
+    dist_next = np.linalg.norm(players - nxt[:, None, :], axis=2)
+    pvel = np.full(players.shape, np.nan, np.float32)    # player velocity over the next LAG frames
+    pvel[:-LAG] = (players[LAG:] - players[:-LAG]) * (FPS / LAG)
+    reach = np.linalg.norm((players + pvel) - (ball + va)[:, None, :], axis=2)   # distance in 1 s
+
     blocks = {}
     for t in (HOME, AWAY):
         m = team == t
@@ -170,6 +237,11 @@ def features(d, pitch=(105.0, 68.0)):
             "d1_m1": _shift_mean(d1, 25, False), "d1_p1": _shift_mean(d1, 25, True),
             "d1_m3": _shift_mean(d1, 75, False), "d1_p3": _shift_mean(d1, 75, True),
             "n5_m1": _shift_mean(n5, 25, False), "n5_p1": _shift_mean(n5, 25, True),
+            "tch_age": age_b[t], "tch_until": age_f[t],
+            "tch_last": (age_b[t] < age_b[1 - t]).astype(np.float32),
+            "tch_next": (age_f[t] < age_f[1 - t]).astype(np.float32),
+            "tch_rate": _roll(touch[t].astype(np.float32), 150),
+            "reach1": _nanmin(reach[:, m]), "d1_next": _nanmin(dist_next[:, m]),
         }
     seenf = seen.astype(np.float32)
     shared = {
@@ -183,6 +255,9 @@ def features(d, pitch=(105.0, 68.0)):
         "speed_all_p15": _shift_mean(speed_all, 375, True),
         "seen_m1": _shift_mean(seenf, 25, False), "seen_p1": _shift_mean(seenf, 25, True),
         "seen_p3": _shift_mean(seenf, 75, True),
+        "ball_acc": acc, "ball_turn": turn,
+        "ball_until": _age(seen, True),
+        "duel": ((near[HOME] <= 1.0) & (near[AWAY] <= 1.0)).astype(np.float32),
         "gap_d1": blocks[HOME]["d1"] - blocks[AWAY]["d1"],
     }
     cols = [blocks[HOME][k] for k in TEAM_FEATURES] + [blocks[AWAY][k] for k in TEAM_FEATURES] \
@@ -236,6 +311,43 @@ def viterbi(prob, switch_cost, dead_cost, prior=None, floor=1e-4):
     for t in range(n - 1, 0, -1):
         path[t - 1] = back[t, path[t]]
     return path
+
+
+def viterbi_tv(prob, switch_cost, dead_cost, floor=1e-4):
+    """Viterbi with a cost per frame: switch_cost and dead_cost are (n,) arrays, the cost of
+    changing label INTO that frame."""
+    n = len(prob)
+    lp = np.log(np.clip(prob, floor, 1.0))
+    score = lp[0].copy()
+    back = np.zeros((n, 3), dtype=np.int8)
+    for t in range(1, n):
+        sw, dc = switch_cost[t], dead_cost[t]
+        trans = np.array([[0.0, sw, dc], [sw, 0.0, dc], [dc, dc, 0.0]])
+        cand = score[:, None] - trans
+        best = np.argmax(cand, axis=0)
+        back[t] = best
+        score = cand[best, np.arange(3)] + lp[t]
+    path = np.zeros(n, dtype=np.int8)
+    path[-1] = int(np.argmax(score))
+    for t in range(n - 1, 0, -1):
+        path[t - 1] = back[t, path[t]]
+    return path
+
+
+def boundary_costs(bnd, switch_cost, dead_cost, beta):
+    """Cheaper changes where the boundary head expects one: cost * (1 - beta * p(change))."""
+    f = 1.0 - beta * np.clip(bnd, 0.0, 1.0)
+    return switch_cost * f, dead_cost * f
+
+
+def label_tv(prob, halves, switch_cost, dead_cost, bnd, beta):
+    """Like label(), with the change costs lowered by the boundary probability `bnd`."""
+    out = np.full(len(prob), "X", dtype="<U1")
+    sw, dc = boundary_costs(bnd, switch_cost, dead_cost, beta)
+    for _, first, last in halves:
+        path = viterbi_tv(prob[first:last + 1], sw[first:last + 1], dc[first:last + 1])
+        out[first:last + 1] = np.array(STATES)[path]
+    return out
 
 
 def label(prob, halves, switch_cost, dead_cost, prior=None):

@@ -35,7 +35,8 @@ def prepare_inputs(X, stats=None):
     return np.concatenate([Z, miss.astype(np.float32)], axis=1).astype(np.float32), stats
 
 
-def build_net(n_in):
+def build_net(n_in, n_out=3):
+    """n_out = 3 (H, A, D) or 4: the fourth output is a logit for "the label changes here"."""
     import torch.nn as nn
 
     class Net(nn.Module):
@@ -43,7 +44,7 @@ def build_net(n_in):
             super().__init__()
             self.inp = nn.Sequential(nn.Linear(n_in, 96), nn.ReLU())
             self.gru = nn.GRU(96, HIDDEN, num_layers=2, batch_first=True, bidirectional=True, dropout=0.1)
-            self.out = nn.Linear(2 * HIDDEN, 3)
+            self.out = nn.Linear(2 * HIDDEN, n_out)
 
         def forward(self, x):
             h, _ = self.gru(self.inp(x))
@@ -63,14 +64,19 @@ def swap_inputs(Z, n_team):
     return Y
 
 
-def predict_half(net, Z):
-    """(n, 3) probabilities for one half: GRU on every 5th frame, repeated to 25 fps."""
+def predict_half(net, Z, boundary=False):
+    """(n, 3) probabilities for one half: GRU on every 5th frame, repeated to 25 fps.
+    With boundary=True also (n,) probability that the label changes there (None without that head)."""
     import torch
     sub = Z[::STEP]
     with torch.no_grad():
         logits = net(torch.from_numpy(sub[None]))[0]
-        p = torch.softmax(logits, dim=-1).numpy()
-    return np.repeat(p, STEP, axis=0)[:len(Z)]
+        p = torch.softmax(logits[:, :3], dim=-1).numpy()
+        b = torch.sigmoid(logits[:, 3]).numpy() if logits.shape[1] > 3 else None
+    p = np.repeat(p, STEP, axis=0)[:len(Z)]
+    if not boundary:
+        return p
+    return p, (None if b is None else np.repeat(b, STEP)[:len(Z)])
 
 
 def load(path):
@@ -79,7 +85,7 @@ def load(path):
     saved = torch.load(path, map_location="cpu", weights_only=False)
     nets = []
     for state in saved.get("states") or [saved["state"]]:
-        net = build_net(saved["n_in"])
+        net = build_net(saved["n_in"], saved.get("n_out", 3))
         net.load_state_dict(state)
         net.eval()
         nets.append(net)
@@ -102,5 +108,29 @@ def predict_proba(bundle, X, halves):
         for net in nets:              # several seeds: plain average
             net.eval()
             acc += (predict_half(net, z) + predict_half(net, zs)[:, [1, 0, 2]]) / 2
+        out[first:last + 1] = acc / len(nets)
+    return out
+
+
+def predict_boundary(bundle, X, halves):
+    """(n,) probability that the label changes at each frame, averaged over seeds and both team
+    orders (a change is a change whichever team is home). None if the nets have no such head."""
+    import torch
+    from tactico import ml
+    torch.set_num_threads(1)
+    nets = bundle.get("nets") or [bundle["net"]]
+    n_team = len(ml.TEAM_FEATURES)
+    Z, _ = prepare_inputs(X, bundle["stats"])
+    out = np.zeros(len(X), dtype=np.float32)
+    for _, first, last in halves:
+        z = Z[first:last + 1]
+        zs = swap_inputs(z, n_team)
+        acc = np.zeros(len(z), dtype=np.float32)
+        for net in nets:
+            net.eval()
+            b1 = predict_half(net, z, boundary=True)[1]
+            if b1 is None:
+                return None
+            acc += (b1 + predict_half(net, zs, boundary=True)[1]) / 2
         out[first:last + 1] = acc / len(nets)
     return out

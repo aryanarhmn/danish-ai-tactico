@@ -32,7 +32,7 @@ import blend_cv as B  # noqa: E402
 import train_ml as T  # noqa: E402
 from tune_external import degrade, raw_games  # noqa: E402
 
-MATCH, START, SECONDS, FPS = "DJ03WOH", 103799, 40, 5
+MATCH, START, SECONDS, FPS = "DJ03WOH", 93250, 40, 5
 W, H = 1200, 940
 SC = 9.6                       # px per metre
 PX, PY = 75, 112               # pitch origin

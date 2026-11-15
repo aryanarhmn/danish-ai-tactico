@@ -21,7 +21,9 @@ whole half, so it can carry what happened 30 seconds ago through a long stretch 
 ball. We average the two models' probabilities, and Viterbi decoding then charges a cost for every
 change of label. The decoder turns flickering per-frame guesses into whole possessions, which is
 what spellF1 rewards. In training, frames inside short possessions count up to three times as much,
-because spellF1 gives a two-second possession the same weight as a forty-second one.
+because spellF1 gives a two-second possession the same weight as a forty-second one. Besides the
+team shape around the ball, the features mark where the ball changes direction or speed next to a
+player, which is where a team touches it.
 
 The model is trained only on external data, as the organisers' clarification of 3 November
 requires. No parameter is fitted to the competition game, its ground truth or its video, and no
@@ -100,7 +102,7 @@ seen.
 
 ## Features
 
-One row per frame, 67 values. Each team gets the same block of features, so swapping the blocks
+One row per frame, 85 values. Each team gets the same block of features, so swapping the blocks
 swaps the teams. Training uses both orders, and prediction averages both, so the model cannot
 learn anything about which side is "home".
 
@@ -111,9 +113,19 @@ team's centre is pushed towards the opponent's goal (now and averaged over the p
 10 seconds) and how fast it moves that way over 1, 3 and 10 seconds, the team's
 spread in length and width, and the ball's position along the team's attacking direction.
 
+Touches, per team: the time since the team last touched the ball and until it next does, which team
+touched it last and which touches it next, how often the team touches the ball in the six
+seconds around the frame, how close its nearest player can get to where the ball will be one second later, and the
+distance from its nearest player to the place where the ball is next seen. A touch is a frame where
+the ball turns by at least 15° or changes speed by at least 2 m/s, measured over three frames,
+with a player of that team within 1.5 m and closer than any opponent. Where the ball is not tracked
+there are no touches, and the times run until the ball is seen again.
+
 Shared: whether the ball is tracked and for how long it has been missing, ball speed now and over
-the last and next second, distance to the touchline and goal line, ball outside the pitch, mean
-player speed over 2, 5 and 15 second windows before and after the frame.
+the last and next second, ball acceleration and turning angle, the time until the ball is tracked
+again, whether players of both teams are within 1 m of the ball, distance to the touchline and
+goal line, ball outside the pitch, mean player speed over 2, 5 and 15 second windows before and after
+the frame.
 
 Many of these work without the ball. The team in possession pushes up and spreads out, the
 defending team drops and narrows, and at a stoppage everyone slows down. The ball is missing on four
@@ -183,7 +195,8 @@ SkillCorner mean.
 | 3 GRUs, weight 0.5, costs 4/12 | 0.556 | 0.498 | 0.527 |
 | 3 GRUs, weight 0.8, costs 4/12 | 0.572 | 0.499 | 0.535 |
 | same, plus the nine older SkillCorner matches in training | 0.573 | 0.504 | 0.538 |
-| same, with short possessions weighted in training (submitted) | **0.633** | **0.516** | **0.575** |
+| same, with short possessions weighted in training | 0.633 | **0.516** | 0.575 |
+| same, plus touch features (submitted) | **0.673** | 0.513 | **0.593** |
 
 The top of the table is flat: GRU weights 0.7 to 0.8 with switch costs 2 to 4 and dead-ball costs
 8 to 12 all score 0.535 within 0.001, so we took a setting in the middle of that plateau. It beats
@@ -210,6 +223,27 @@ alone gains 0.018 on DFL and 0.002 on SkillCorner, so most of the gain comes thr
 ran the grid of weights and costs again on the new folds: 0.8 and 4/12 is still at the top, so the
 settings did not change.
 
+**Detecting touches.** Most errors came from the team split, not from dead balls. With the true
+dead balls given to the decoder the criterion only reached about 0.62, but with the true team on
+every live frame it reached about 0.93. The models also missed most very short possessions: on DFL
+they found 30 % of the true possessions under three seconds, on SkillCorner 10 %. A possession
+changes hands at a touch, and the earlier features only said how close each team was to the ball.
+We therefore added the touch features described under Features. With the same folds, three seeds,
+weight 0.8 and costs 4/12, the criterion rose from 0.575 to 0.593. DFL rose on all 7 matches
+(0.633 to 0.673; the smallest gain was 0.019), while SkillCorner stayed level (0.516 to 0.513, better
+on 9 of the 20 matches). The classifier alone rose from 0.543 to 0.624 on DFL. We read the split this
+way: the SkillCorner ball comes from broadcast video and jumps, so turns and speed changes there are
+mostly noise, while the DFL ball is smooth. The competition ball is smooth too (about 1 cm of jitter).
+Re-running the grid of weights and costs moved the criterion by at most 0.001, so 0.8 and 4/12 stayed.
+
+Before adopting the change we also tested it once on the three Metrica games, which no model or
+setting had seen (`tools/metrica_test.py`: trained on all DFL and SkillCorner matches, three GRUs,
+the submitted settings). spellF1 rose on all three games, from 0.688, 0.609 and 0.665 to 0.734,
+0.678 and 0.727 (mean 0.654 to 0.713), and macroF1 from 0.905 to 0.918.
+
+A fourth output that predicts where the label changes, used to lower the switching cost there, gave
+nothing on top of the touch features (+0.002 on the criterion), so we left it out.
+
 We also tried a second stage that sees the first stage's probabilities over 30 seconds before
 and after each frame (`tools/stack_cv.py`). It scored the same on DFL (0.568) and 0.014 higher on
 the Metrica games, too little to justify a second model, so we left it out. Earlier we tried, and
@@ -217,9 +251,12 @@ dropped, a rule that the ball must move with the player and rules for goals and 
 the line. None of them helped on external data.
 
 **Public five-minute check.** After the final model was fixed, we scored it once on the public five
-minutes with the official script, as a check that the file and labels are right: spellF1 0.549,
-macroF1 0.774, 18 predicted possessions against 17. The window has only 17 possessions, so one more
-or one fewer moves spellF1 by about six points. Nothing was chosen or tuned on it.
+minutes with the official script, as a check that the file and labels are right: spellF1 0.514,
+macroF1 0.817, 25 predicted possessions against 17. The previous version, without touch features,
+had scored 0.549, 0.774 and 18. The window has only 17 possessions, so one more or one fewer moves
+spellF1 by about six points, and the official script itself gives a noise band of about 0.04. We
+kept the new model, because it was chosen on 30 external matches before this check, and switching
+back on the strength of five minutes of the competition truth would be tuning on it.
 
 ## Limitations
 
@@ -236,8 +273,11 @@ Our degradation is an incomplete model of the automatic tracking. It places ball
 speed, as measured, but it does not simulate identity switches, false detections or a ball tracked
 in the wrong place.
 
-We did not test the GRU on the Metrica games. With more time we would add more external matches of
-automatic tracking with full possession and stoppage labels, and try a larger GRU.
+The touch features need a smooth ball. They help on DFL and Metrica but not on the SkillCorner
+broadcast tracking, and on the public five minutes the model splits possessions more often than the
+truth does (25 against 17). If the competition ball is noisier than our measurements suggest, the
+touches will add false switches. With more time we would add more external matches of automatic
+tracking with full possession and stoppage labels, and try a larger GRU.
 
 ## Reproduction
 
@@ -254,6 +294,7 @@ python tools/train_ml.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --ext
 python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --extra-dir C:/mtah-ext/sc-old --cv --seeds 3 --spell-balance 1.0 --dump C:/mtah-ext/dump   # optional
 python tools/blend_cv.py C:/mtah-ext/dump                                                                       # optional
 python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --extra-dir C:/mtah-ext/sc-old --epochs 6 --seeds 3 --save models/sequence.pt --spell-balance 1.0
+python tools/metrica_test.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --extra-dir C:/mtah-ext/sc-old --sample-dir C:/mtah-ext/sample-data --spell-balance 1.0   # optional
 python run.py --model models/possession.pkl --seq models/sequence.pt --seq-weight 0.8 --switch-cost 4 --dead-cost 12
 python evaluation/validate_submission.py evaluation/results/Danish_AI-Tactico.csv
 ```

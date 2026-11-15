@@ -8,8 +8,8 @@ ball is missing on four frames in ten.
 
 <sub>A Bundesliga match from the DFL open data that the model never trained on, with the ball
 removed the way the competition tracker loses it. The clip is a typical one, not the best: the model
-agrees with the truth on 93 % of its frames and on 92 % of the whole match. It catches the short
-away spell in the middle, a little late. Regenerate it with `tools/make_readme_anim.py`. No competition data is
+agrees with the truth on 93 % of its frames and on 93 % of the whole match. It misses the last,
+half-second away touch and adds a short home spell that was not there. Regenerate it with `tools/make_readme_anim.py`. No competition data is
 shown anywhere in this repository.</sub>
 
 The repository is built on Metrica Sports'
@@ -22,8 +22,10 @@ official version (their README is now `README_metrica.md`). Our write-up is
 
 ## How it works
 
-Every frame becomes 67 numbers: distances from the ball to each team, how far each team is pushed
-up and how spread out it is, how fast the players move, and how long the ball has been missing.
+Every frame becomes 85 numbers: distances from the ball to each team, how far each team is pushed
+up and how spread out it is, how fast the players move, how long the ball has been missing, and
+when each team last touched the ball and next will. A touch is a sharp turn or change of speed of
+the ball with one team's player closest and within 1.5 m.
 Both teams get the same block of features, and the models see both orders, so they cannot learn
 anything about which side is the home team.
 
@@ -53,23 +55,25 @@ mostly when the players walk (80 % below 1 m/s, 11 % above 2 m/s).
 
 spellF1 on matches the models were not trained on, five-fold cross-validation:
 
-| Held out | Classifier, DFL only | Classifier, DFL + SkillCorner | Submitted (classifier + 3 GRUs) |
+| Held out | Classifier only | Without touch features | Submitted (classifier + 3 GRUs) |
 |---|---|---|---|
-| DFL, 7 matches | 0.565 | 0.521 | **0.633** |
-| SkillCorner, 20 matches | 0.306 | 0.468 | **0.516** |
+| DFL, 7 matches | 0.624 | 0.633 | **0.673** |
+| SkillCorner, 20 matches | 0.459 | **0.516** | 0.513 |
+| Metrica, 3 matches (test only) | | 0.654 | **0.713** |
 
-The first column shows why we added SkillCorner: a model trained only on clean data falls apart on
-real automatic tracking. Weighting short possessions raised the submitted system from 0.573 to
-0.633 on DFL and from 0.504 to 0.516 on SkillCorner, and improved 25 of the 27 matches. The blend weight and the decoding costs (4 per change of team, 12 in or
-out of a dead ball) were picked on these folds with `tools/blend_cv.py`, with a criterion fixed
-before we looked at the numbers.
+The touch features helped on all seven DFL matches and all three Metrica games, and did nothing on
+SkillCorner, whose broadcast ball jumps too much for a turn of the ball to mean anything. The
+competition ball is smooth, like DFL's. A classifier trained only on clean DFL data scored 0.306 on
+SkillCorner, which is why SkillCorner is in the training set at all. The blend weight and the
+decoding costs (4 per change of team, 12 in or out of a dead ball) were picked on these folds with
+`tools/blend_cv.py`, with a criterion fixed before we looked at the numbers.
 
 These scores are on other matches, under other providers' definitions of possession, so they
 cannot be compared with the competition board or its published baseline (spellF1 0.2433 on the
 full match). The SkillCorner labels also come from SkillCorner's own algorithm, so that row measures
 how closely we reproduce it on automatic tracking.
 
-![Three minutes of a held-out Bundesliga match: truth, our model and the rule system](docs/timeline.png)
+![Three minutes of a held-out Bundesliga match: truth, our model and the version without touch features](docs/timeline.png)
 
 ## Reproduce the submitted file
 
@@ -105,6 +109,7 @@ The cross-validation behind the numbers above:
 python tools/cv_multi.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --sample-dir C:/mtah-ext/sample-data
 python tools/train_seq.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --extra-dir C:/mtah-ext/sc-old --cv --seeds 3 --spell-balance 1.0 --dump C:/mtah-ext/dump
 python tools/blend_cv.py C:/mtah-ext/dump
+python tools/metrica_test.py --dfl-dir C:/mtah-ext/dfl --sc-dir C:/mtah-ext/sc --extra-dir C:/mtah-ext/sc-old --sample-dir C:/mtah-ext/sample-data
 ```
 
 Retraining on another machine or library version can give slightly different models. The
@@ -119,6 +124,7 @@ committed ones produced the submission.
 | `tactico/seq.py` | the GRU |
 | `tools/train_ml.py`, `tools/train_seq.py` | training and cross-validation |
 | `tools/blend_cv.py` | picks the blend weight and decoding costs |
+| `tools/metrica_test.py` | trains on all external matches and scores the three Metrica games |
 | `tools/external/` | download and convert DFL, SkillCorner and Metrica data |
 | `tools/noise_match.py`, `tools/gap_profile.py` | measure the competition tracking (summary numbers only) |
 | `models/` | the trained models used for the submission |

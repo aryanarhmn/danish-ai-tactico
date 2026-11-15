@@ -53,6 +53,43 @@ try:                                              # same algorithm as ml.viterbi
             path[t - 1] = back[t, path[t]]
         return path
 
+    @numba.njit(cache=True)
+    def _viterbi_tv(lp, sw, dc):
+        n = lp.shape[0]
+        score = lp[0].copy()
+        back = np.zeros((n, 3), dtype=np.int8)
+        cand = np.empty((3, 3))
+        new = np.empty(3)
+        trans = np.zeros((3, 3))
+        for t in range(1, n):
+            trans[0, 1] = trans[1, 0] = sw[t]
+            trans[0, 2] = trans[1, 2] = trans[2, 0] = trans[2, 1] = dc[t]
+            for i in range(3):
+                for j in range(3):
+                    cand[i, j] = score[i] - trans[i, j]
+            for j in range(3):
+                b = 0
+                for i in range(1, 3):
+                    if cand[i, j] > cand[b, j]:
+                        b = i
+                back[t, j] = b
+                new[j] = cand[b, j] + lp[t, j]
+            score[:] = new
+        path = np.zeros(n, dtype=np.int8)
+        path[n - 1] = np.argmax(score)
+        for t in range(n - 1, 0, -1):
+            path[t - 1] = back[t, path[t]]
+        return path
+
+    def label_tv(prob, halves, sw, dc, bnd, beta):
+        """Change costs lowered where the boundary head expects a change (ml.label_tv, compiled)."""
+        out = np.full(len(prob), "X", dtype="<U1")
+        swa, dca = ml.boundary_costs(bnd.astype(np.float64), sw, dc, beta)
+        for _, first, last in halves:
+            lp = np.log(np.clip(prob[first:last + 1].astype(np.float64), 1e-4, 1.0))
+            out[first:last + 1] = np.array(ml.STATES)[_viterbi_tv(lp, swa[first:last + 1], dca[first:last + 1])]
+        return out
+
     def label(prob, halves, sw, dc):
         out = np.full(len(prob), "X", dtype="<U1")
         for _, first, last in halves:
@@ -61,6 +98,7 @@ try:                                              # same algorithm as ml.viterbi
         return out
 except ImportError:
     label = ml.label
+    label_tv = ml.label_tv
 
 
 def main():
