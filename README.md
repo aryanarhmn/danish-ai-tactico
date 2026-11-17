@@ -1,3 +1,12 @@
+<p align="center"><img src="docs/banner.svg" alt="Who has the ball? Team Danish AI-Tactico, More than a Hack 2027" width="100%"></p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/spellF1%20(cross--validated)-0.593-004D98?style=flat-square" alt="spellF1 cross-validated 0.593">
+  <img src="https://img.shields.io/badge/Metrica%20test-0.713-A50044?style=flat-square" alt="Metrica test 0.713">
+  <img src="https://img.shields.io/badge/submission-byte--reproducible-181733?style=flat-square" alt="byte-reproducible submission">
+  <img src="https://img.shields.io/badge/training%20data-open%20only-EDBB00?style=flat-square" alt="open training data only">
+</p>
+
 # Danish AI-Tactico
 
 Our entry for More than a Hack 2027, Phase 1: label every frame of FC Barcelona vs Athletic Club
@@ -151,10 +160,16 @@ downloaded by the scripts above and is not committed either.
 - Metrica Sports sample data, github.com/metrica-sports/sample-data.
 - Competition data and scorer: Metrica Sports and FC Barcelona, More than a Hack 2027.
 - Typefaces Archivo (Omnibus-Type) and Big Shoulders Display (Patric King), SIL Open Font Licence,
-  embedded in `docs/replay.svg`.
+  embedded in the SVG figures under `docs/`.
 
 ## Team
 
-Aryan Abdel Rahman (team lead), Allan Abdel Rahman, Ibraahim Dahir Xanaf, William Luu and Kiyan
-Rohanimanesh. Students at the University of Southern Denmark, the Technical University of Denmark
-and UCL University College, Odense.
+<table>
+<tr>
+<td align="center" valign="top" width="20%"><img src="docs/team/aryan.svg" width="96" alt=""><br><b>Aryan Abdel Rahman</b><br><sub><b>Team lead</b></sub><br><sub>MSc Data Science, University of Southern Denmark</sub><br><a href="https://www.linkedin.com/in/aryan-abdel-rahman"><img src="https://img.shields.io/badge/LinkedIn-0A66C2?style=flat-square&logo=linkedin&logoColor=white" alt="LinkedIn"></a></td>
+<td align="center" valign="top" width="20%"><img src="docs/team/allan.svg" width="96" alt=""><br><b>Allan Abdel Rahman</b><br><sub>Global Management and Manufacturing, University of Southern Denmark</sub><br><a href="https://www.linkedin.com/in/allan-abdel-rahman"><img src="https://img.shields.io/badge/LinkedIn-0A66C2?style=flat-square&logo=linkedin&logoColor=white" alt="LinkedIn"></a></td>
+<td align="center" valign="top" width="20%"><img src="docs/team/ibraahim.svg" width="96" alt=""><br><b>Ibraahim Dahir Xanaf</b><br><sub>MSc Data Science, University of Southern Denmark</sub><br><a href="https://www.linkedin.com/in/ibrahim-dahir-hanaf"><img src="https://img.shields.io/badge/LinkedIn-0A66C2?style=flat-square&logo=linkedin&logoColor=white" alt="LinkedIn"></a></td>
+<td align="center" valign="top" width="20%"><img src="docs/team/william.svg" width="96" alt=""><br><b>William Luu</b><br><sub>BSc Health Data, Technical University of Denmark</sub><br><a href="https://www.linkedin.com/in/william-luu"><img src="https://img.shields.io/badge/LinkedIn-0A66C2?style=flat-square&logo=linkedin&logoColor=white" alt="LinkedIn"></a></td>
+<td align="center" valign="top" width="20%"><img src="docs/team/kiyan.svg" width="96" alt=""><br><b>Kiyan Rohanimanesh</b><br><sub>PBA Cybersecurity, UCL University College, Odense</sub><br><a href="https://www.linkedin.com/in/kiyan-rohanimanesh"><img src="https://img.shields.io/badge/LinkedIn-0A66C2?style=flat-square&logo=linkedin&logoColor=white" alt="LinkedIn"></a></td>
+</tr>
+</table>
